@@ -1,0 +1,9 @@
+{
+    "indentSize": 4,
+    "tabSize": 4,
+    "insertSpaceBeforeFunctionParenthesis": true,
+    "insertSpaceAfterFunctionKeywordForAnonymousFunctions": true,
+    "insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces": false,
+    "placeOpenBraceOnNewLineForFunctions": false,
+    "placeOpenBraceOnNewLineForControlBlocks": false
+}
