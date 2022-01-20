@@ -20,6 +20,8 @@
     "author": "Harikrishnan G.",
     "license": "Apache-2.0",
     "devDependencies": {
-        "vite": "^2.7.10"
+        "jest": "^27.4.7",
+        "vite": "^2.7.10",
+        "vite-plugin-inspect": "^0.3.13"
     }
 }

@@ -1,0 +1,38 @@
+// -*- mode: js2 -*-
+
+const C32 = 0x100000000;
+
+// C' ldexp function
+$defmacro(function $_ldexp(a, b) { (a) * (2 ** (b)) }, 'expr');
+
+
+// Index of real part
+$defmacro(function $_reidx(i) { (i) * 2 }, 'expr');
+
+// Index of imaginary part
+$defmacro(function $_imidx(i) { (i) * 2 + 1 }, 'expr');
+
+
+$defmacro(function $_swap(a, b) {
+    $generate_temporaries(tmp);
+    tmp = a;
+    a = b;
+    b = tmp;
+});
+
+
+// Bit shifting is 32 bits in javascript and interpreted as signed integers after
+// the operation.
+
+$defmacro(function $_lo32(v64) { (v64 % C32) }, 'expr');
+
+$defmacro(function $_hi32(v64) { ((v64 / C32) | 0) }, 'expr');
+
+$defmacro(function $_lsh(a, n) { (a * (2 ** n)) }, 'expr');
+
+$defmacro(function $_rsh(a, n) { ((a / (2 ** n))|0) }, 'expr');
+
+
+$defmacro(function $_combinewords(a, b, bscale) {
+    ((bscale === 0) ? b : ($_rsh(a, 32 - bscale) + $_lsh(b, bscale)))
+}, 'expr');
