@@ -1,6 +1,6 @@
 /*!
  * jsreal, a library for exact real number computation in JavaScript.
- * Copyright (C) 2022 Harikrishnan Gopalakrishnan
+ * Copyright (C) 2022 Harikrishnan Gopalakrishnan.
  *
  * jsreal is a derivative work, heavily based on RealLib (https://github.com/blambov/RealLib).
  * The nature of modification includes porting of RealLib from C++ to JavaScript/TypeScript.
@@ -11,3 +11,8 @@
  * Copyright notice: https://github.com/hkrish/jsreal/blob/master/NOTICE
  * License:          https://github.com/hkrish/jsreal/blob/master/LICENSE
  */
+
+export * from './convolution';
+export * from './convolution-double';
+export * from './convolution-generic';
+export * from './kernels';

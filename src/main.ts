@@ -1,10 +1,9 @@
-/*
- * File: src/main.ts
- * description:
- *
- * This file is part of the jsreal project.
- *
- * Copyright (C) 2022 Harikrishnan Gopalakrishnan
- * Original source: https://github.com/hkrish/jsreal.
- * See copyright notice file: NOTICE
- */
+import * as R from './jsreal';
+import * as K from './kernels';
+
+declare global {
+    interface Window { [key: string]: any }
+}
+
+window.R = R;
+window.K = K;
