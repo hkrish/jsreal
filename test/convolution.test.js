@@ -1,15 +1,34 @@
-const jsreal = require("../dist/jsreal.umd.js");
+const fs = require('fs');
+const process = require('process');
+const path = require('path');
 const data = require('./data/conv.test-data.js');
+const winit = require('./wasm-init.js');
 const { test_start_module, test_print_summary, test_print_summary_on_exit,
         $time, check, CurrentTestEnv } = require('../tools/tester.js');
 
+const fwasm = CurrentTestEnv.wasm_test_module_path_for('kernel.wat');
 
-const ConvolutionDouble = jsreal.ConvolutionDouble;
+let wmemory, arg_off, arr_args, arr_ws, arr_br;
 
+let [winst, offsets, opts] = winit.load_wasm(fwasm, (off) => {
+    offsets = off;
+    wmemory = offsets.memory;
+    arg_off = offsets.offset_arg;
+    arr_args = new Float64Array(wmemory.buffer, arg_off);
+    arr_ws = new Float64Array(wmemory.buffer, offsets.offset_cwei);
+    arr_br = new Uint32Array(wmemory.buffer, offsets.offset_cbr);
+});
+
+let wfns = winst.exports;
+
+wfns.initialize(128);
+
+// ----- Result -helpers -----
 
 let actualresults = {
-    weights: [],
     input_128: [],
+    weights: [],
+    brs: [],
     fft_fwd_ip: [],
     fft_inv_ip: [],
     fft_fwd_ip_rc: [],
@@ -17,15 +36,10 @@ let actualresults = {
     convolve: []
 };
 
-const size = 128;
-let conv;
-const inp = new Array(size * 2);
-const tol = 1e-11;
 
 const id = i => i;
-const reidx = i => (i * 2);
-const imidx = i => (i * 2 + 1);
-
+const reidx = (i) => (i * 2);
+const imidx = (i) => (i * 2 + 1);
 
 function store_result1 (size, dst, src, f=id, idx=id) {
     for (let i = 0; i < size; ++i) {
@@ -46,57 +60,68 @@ function store_result3 (size, dst, idx, src, f=id, ridx=reidx, iidx=imidx) {
     }
 }
 
-const test = test_start_module(`Convolution (JavaScript) tests`);
+const test = test_start_module(`Convolution (WebAssembly) tests`,
+                               `loading: ${path.relative(process.cwd(), fwasm)}`);
 
+// ----- Initialisation -----
 
-conv = new ConvolutionDouble(size * 2, Math.PI * 2);
+const size = 128;
+const tol = 1e-11;
+
+wfns.conv_init(2 * size);
+
+// Initialise arguments
 for (let i = 0; i < size; ++i) {
-    inp[reidx(i)] = i + 1;
-    inp[imidx(i)] = -i;
+    arr_args[reidx(i)] = i + 1;
+    arr_args[imidx(i)] = -i;
 }
-store_result2(size, actualresults.input_128, inp);
-store_result2(size, actualresults.weights, conv.weights);
+store_result2(size, actualresults.input_128, arr_args);
+store_result2(size, actualresults.weights, arr_ws);
+store_result1(size, actualresults.brs, arr_br);
 
 // Forward FFT
-ConvolutionDouble.fft_fwd_ip(size, conv.weights, inp, 2);
-const breidx = i => reidx(conv.br[i]);
-const bimidx = i => imidx(conv.br[i]);
-store_result3(size, actualresults.fft_fwd_ip, conv.br, inp, id, breidx, bimidx);
+wfns.fft_fwd_ip(size, arg_off, 2);
+const breidx = i => reidx(arr_br[i]);
+const bimidx = i => imidx(arr_br[i]);
+store_result3(size, actualresults.fft_fwd_ip, arr_br, arr_args, id, breidx, bimidx);
 
 // Inverse FFT
-ConvolutionDouble.fft_inv_ip(size, conv.weights, inp, 2);
+wfns.fft_inv_ip(size, arg_off, 2);
 const fscalesize = a => a / size;
-store_result2(size, actualresults.fft_inv_ip, inp, fscalesize);
+store_result2(size, actualresults.fft_inv_ip, arr_args, fscalesize);
 
 // Forward FFT: complex to real
 const sizer = size * 2;
 for (let i = 0; i < sizer; ++i) {
-    inp[i] = i;
+    arr_args[i] = i;
 }
-ConvolutionDouble.fft_fwd_ip_rc(sizer, conv.weights, conv.br, inp, 1);
-store_result3(size, actualresults.fft_fwd_ip_rc, conv.br, inp, id, breidx, bimidx);
+wfns.fft_fwd_ip_rc(sizer, arg_off, 1);
+store_result3(size, actualresults.fft_fwd_ip_rc, arr_br, arr_args, id, breidx, bimidx);
 
 // Inverse FFT: real to complex
 const fscalesizer = a => a / (sizer * 2);
-ConvolutionDouble.fft_inv_ip_cr(sizer, conv.weights, conv.br, inp, 1);
-store_result1(sizer, actualresults.fft_inv_ip_cr, inp, fscalesizer);
+wfns.fft_inv_ip_cr(sizer, arg_off, 1);
+store_result1(sizer, actualresults.fft_inv_ip_cr, arr_args, fscalesizer);
 
 // Convolution
-let b = new Array(size * 2);
-b[0] = 1;
-b[1] = 1;
+// argument b
+arr_args[sizer + 0] = 1;
+arr_args[sizer + 1] = 1;
 for (let i = 2; i < sizer; ++i) {
-    b[i] = 0;
+    arr_args[sizer + i] = 0;
 }
-conv.convolve(inp, b);
-store_result1(sizer, actualresults.convolve, inp, fscalesizer);
+wfns.convolve(arg_off, arg_off + (sizer * 8), sizer);
+store_result1(sizer, actualresults.convolve, arr_args, fscalesizer);
 
-const reallib_results = data.reallib_test_results;
+
+// ----- Tests -----
 
 const {
     nested_array_close_to
     , array_close_to
 } = check;
+
+const reallib_results = data.reallib_test_results;
 
 test('Operating on same input', () => {
     return nested_array_close_to(actualresults.input_128, reallib_results.input_128, tol);
@@ -106,12 +131,24 @@ test('Weights are computed exactly', () => {
     return nested_array_close_to(actualresults.weights, reallib_results.weights, tol);
 });
 
+test('Bit-reversed indices are computed exactly', () => {
+    return array_close_to(actualresults.brs, reallib_results.brs, tol);
+});
+
 test('Results of fft_fwd_ip match', () => {
     return nested_array_close_to(actualresults.fft_fwd_ip, reallib_results.fft_fwd_ip, tol);
 });
 
 test('Results of fft_inv_ip match', () => {
     return nested_array_close_to(actualresults.fft_inv_ip, reallib_results.fft_inv_ip, tol);
+});
+
+test('Weights are unchanged', () => {
+    return nested_array_close_to(actualresults.weights, reallib_results.weights, tol);
+});
+
+test('Bit-reversed indices are unchanged', () => {
+    return array_close_to(actualresults.brs, reallib_results.brs, tol);
 });
 
 test('Results of fft_fwd_ip_rc match', () => {
@@ -125,3 +162,21 @@ test('Results of fft_inv_ip_cr match', () => {
 test('Results of convolution match', () => {
     return array_close_to(actualresults.convolve, reallib_results.convolve, tol);
 });
+
+
+// ----- Performance -----
+
+const scr_off = offsets.scratch_off;
+let arr_scr = new Float64Array(wmemory.buffer, scr_off);
+for (let i = 0; i < sizer; ++i) {
+    arr_scr[i] = i;
+    arr_scr[sizer + i] = 0;
+}
+arr_scr[sizer + 0] = 1;
+arr_scr[sizer + 1] = 1;
+// ----- Convolution -----
+$time(() => {
+    arr_args.copyWithin(arg_off, scr_off, scr_off + sizer * 2);
+    wfns.convolve(arg_off, arg_off + (sizer * 8), sizer);
+    return arr_args[1];
+}, `convolve ${sizer} x Float64 x 2`, 2);
