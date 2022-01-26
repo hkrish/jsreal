@@ -42,4 +42,6 @@ interface WKernel {
     mantissa_bscale (manidx: number, srcidx: number, scale: number): number;
 
     convolve (aidx: number, bidx: number, size: number): void;
+
+    frexp (x: number, expidx: number): number;
 }

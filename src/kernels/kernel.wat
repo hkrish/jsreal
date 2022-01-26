@@ -1443,6 +1443,39 @@
 
 
  ;; ============================================================================
+ ;; ----- Other Math -----
+ ;; ============================================================================
+
+ ;; This does not handle Infinity. For our purposes, that case will be handled separately
+ (func $frexp (export "frexp")
+   (param $x f64) (param $e i32) (result f64)
+   (local $i i64) (local $ee i32)
+   (i64.reinterpret_f64 (local.get $x))
+   (local.tee $i)
+   (i64.shr_u (i64.const 52))
+   (i64.and (i64.const 0x7ff))
+   i32.wrap_i64
+   (local.tee $ee)
+   i32.eqz
+   (if (result f64)
+       (then
+        (if (f64.ne (local.get $x) (f64.const 0))
+            (then
+             (local.set $x (call $frexp (f64.mul (local.get $x) (f64.const 0x1p64))
+                                 (local.get $e)))
+             (i32.store (local.get $e) (i32.sub (i32.load (local.get $e))
+                                                (i32.const 64))))
+          (else
+           (i32.store (local.get $e) (i32.const 0))))
+        (local.get $x))
+     (else
+      (i32.store (local.get $e) (i32.sub (local.get $ee) (i32.const 0x3fe)))
+      (f64.reinterpret_i64 (i64.or (i64.and (local.get $i)
+                                            (i64.const 0x800fffffffffffff))
+                                   (i64.const 0x3fe0000000000000))))))
+
+
+ ;; ============================================================================
  ;; ----- Helpers -----
  ;; ============================================================================
 
