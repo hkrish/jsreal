@@ -34,7 +34,13 @@ class TestEnv {
     }
 
     print (v) {
-        return JSON.stringify(v, null, 2);
+        if (typeof v === 'string') {
+            return v;
+        } else if (typeof v === 'number' || typeof v === 'boolean') {
+            return v.toString();
+        } else {
+            return JSON.stringify(v, null, 2);
+        }
     }
 
     fg = {
@@ -68,6 +74,42 @@ class TestEnv {
     hex(v) { return v.toString(16); }
     bin(v) { return v.toString(2); }
 
+    current_opts = {
+        description: `Test utilities`,
+
+        args: {
+            '-w' : {
+                description: `Original wasm module ${this.u('base name')}`,
+                value: null,
+                arg: '<file>',
+                help_sort_key: 0,
+            },
+            '-m' : {
+                description: `Test build filename for original wasm module`
+                    + ` (option ${this.fg.blu('-w')})`,
+                value: null,
+                arg: '<file>',
+                help_sort_key: 5,
+            },
+            '-t' : {
+                description: 'Toggle tests',
+                value: true,
+                toggle: true,
+                help_sort_key: 10,
+            },
+            '-p' : {
+                description: 'Toggle performance tests',
+                value: true,
+                toggle: true,
+                help_sort_key: 20,
+            },
+            '-h' : {
+                description: 'Print help',
+                value: false,
+                help_sort_key: 100,
+            },
+        }
+    };
 };
 
 const E = new TestEnv();
@@ -116,7 +158,7 @@ function textu(f, b) {
 let check = {};
 
 check.is = textb((a, b) => Object.is(a, b), 'is');
-check.eq = textb((a, b) => a === b, '===');
+check.eq = textb((a, b) => (a === b || (Number.isNaN(a) && Number.isNaN(b))), '===');
 check.not_eq = textb((a, b) => a !== b, '!==');
 check.gt = textb((a, b) => a > b, '>');
 check.ge = textb((a, b) => a >= b, '>=');
@@ -124,6 +166,7 @@ check.lt = textb((a, b) => a < b, '<');
 check.le = textb((a, b) => a <= b, '<=');
 check.true = textu(a => a, 'true');
 check.false = textu(a => !a, 'false');
+check.close_to = textb((a, b, tol) => Math.abs(a - b) <= tol, 'close_to');
 
 
 check.array_close_to = (received, expected, tol) => {
@@ -206,7 +249,7 @@ exports.check = check;
 // -----------------------------------------------------------------------------
 
 const test = (name, test, nindent) => {
-    if (!current_opts.args['-t'].value) {
+    if (!E.current_opts.args['-t'].value) {
         return;
     }
     let okstr = E.fg.grn('[ OK ]') + ' ';
@@ -292,9 +335,10 @@ function _sepint (n) {
 
 const timeunit = unitref([[1.0, 'ns'], [1.0e3, 'µs'], [1.0e6, 'ms'], [1.0e9, 's']]);
 
-exports.$time = function (f, name, dur) {
-    const timestamp =  process.hrtime.bigint;
-    if (!current_opts.args['-p'].value) {
+const timestamp =  process.hrtime.bigint;
+
+exports.$time = function (f, name) {
+    if (!E.current_opts.args['-p'].value) {
         return 0;
     }
     if (E.stat_perf_skipped) {
@@ -307,26 +351,26 @@ exports.$time = function (f, name, dur) {
                 + E.f(` Skipping performance tests due to failed tests`) , E.indent));
         return 0;
     }
-    if (typeof name === 'number') {
-        dur = name;
-        name = f.name;
-    }
-    dur = dur || 0;
-    dur = (dur < 1) ? 1 : (dur | 0);
-    let durns = dur * 1e9;
-    let count = 0;
+    name = (name == null)? f.name : name;
+    console.info(indent(`\n` + E.fg.blu(`[PERF]`) + ` ${name}`, E.indent));
+    // ----- Warmup -----
     let ret = 0;
-    let readings = [];
-    console.info(indent(`\n` + E.fg.blu(`[PERF]`) + ` ${name} (for ${dur} seconds)`, E.indent));
+    let durns = 1e9;
     let tbegin = timestamp();
+    do {
+        ret += f();
+    } while ((timestamp() - tbegin) <= durns);
+    // ----- Benchmark -----
+    let count = 0;
+    let readings = [];
+    tbegin = timestamp();
     do {
         let t0 = timestamp();
         ret += f();
-        let td = timestamp() - t0;
-        readings.push(td);
+        readings.push(timestamp() - t0);
         ++count;
     } while ((timestamp() - tbegin) <= durns);
-    let ops = _sepint(count / dur);
+    let ops = _sepint(count);
     let median;
     readings.sort();
     if (count % 2 === 0) {
@@ -344,42 +388,6 @@ exports.$time = function (f, name, dur) {
 // ----- Main -----
 // -----------------------------------------------------------------------------
 
-let current_opts = {
-    description: `Test utilities`,
-
-    args: {
-        '-w' : {
-            description: `Original wasm module ${E.u('base name')}`,
-            value: null,
-            arg: '<file>',
-            help_sort_key: 0,
-        },
-        '-m' : {
-            description: `Test build filename for original wasm module`
-                + ` (option ${E.fg.blu('-w')})`,
-            value: null,
-            arg: '<file>',
-            help_sort_key: 5,
-        },
-        '-t' : {
-            description: 'Toggle tests',
-            value: true,
-            toggle: true,
-            help_sort_key: 10,
-        },
-        '-p' : {
-            description: 'Toggle performance tests',
-            value: true,
-            toggle: true,
-            help_sort_key: 20,
-        },
-        '-h' : {
-            description: 'Print help',
-            value: false,
-            help_sort_key: 100,
-        },
-    }
-};
 
 function handle_set_files(opts) {
     if (opts.args['-w'].value == null || opts.args['-m'].value == null){
@@ -442,8 +450,8 @@ function get_test_files() {
 }
 
 if (require.main === module) {
-    current_opts = argparse.parse(process.argv, current_opts);
-    if (!handle_set_files(current_opts)) {
+    E.current_opts = argparse.parse(process.argv, E.current_opts);
+    if (!handle_set_files(E.current_opts)) {
         process.exit(1);
     }
     // Test builds should be available now. Otherwise call through builder.js

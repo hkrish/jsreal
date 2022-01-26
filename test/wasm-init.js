@@ -103,15 +103,11 @@ const wasm_init_options = {
 
 // ----------------------------------------
 
-exports.load_wasm = function load(fwasm, on_change_offset_handler) {
-    fwasm = path.resolve(fwasm);
-    let data = fs.readFileSync(fwasm);
+exports.load_wasm = function load(data, on_change_offset_handler) {
+    // fwasm = path.resolve(fwasm);
+    // let data = fs.readFileSync(fwasm);
     offset_change_handler = on_change_offset_handler;
-    if (data) {
-        let wmodule = new WebAssembly.Module(data);
-        winst = new WebAssembly.Instance(wmodule, wasm_init_options);
-        return [winst, memlayout, wasm_init_options];
-    } else {
-        throw `No module data was read.\n  file: ${fwasm}`;
-    }
+    let wmodule = new WebAssembly.Module(data);
+    winst = new WebAssembly.Instance(wmodule, wasm_init_options);
+    return [winst, memlayout, wasm_init_options];
 };

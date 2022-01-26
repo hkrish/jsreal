@@ -45,9 +45,9 @@
  (global $RAD   f64  (f64.const 0x1.1df46a2529d39p-6))
 
 
- ;; ================================================================================
+ ;; ============================================================================
  ;; ----- Memory layout -----
- ;; ================================================================================
+ ;; ============================================================================
 
  ;; FIX: Handle $preserve-args option
  (func $init-memory-layout
@@ -1031,7 +1031,6 @@
    (local.get $v))
 
 
-
  ;; TODO: Audit kernel methods:
  ;;       - signed vs unsigned variables and operations and comparisons
  ;;       - Loops and branching
@@ -1442,7 +1441,11 @@
      ;; perform a complex-to-complex fft
      (call $fft_inv_ip (local.get $s/2) (local.get $a*) (local.get $w2)))
 
+
+ ;; ============================================================================
  ;; ----- Helpers -----
+ ;; ============================================================================
+
  ;; log2 when argument is a power of 2
  (func $log2_pow2
      (param $n i32) (result i32)

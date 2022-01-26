@@ -15,4 +15,5 @@
 export * from './convolution';
 export * from './convolution-double';
 export * from './convolution-generic';
-export * from './kernels';
+export * from './kernels/kernel';
+export * from './longfloat';

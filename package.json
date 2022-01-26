@@ -8,6 +8,7 @@
         "build": "vite build",
         "serve": "vite preview",
         "buildwasm": "node tools/builder.js -cb && vite build",
+        "watchwasm": "node tools/builder.js -w",
         "test": "node tools/builder.js -t"
     },
     "keywords": [

@@ -1,19 +1,17 @@
 
-declare type WGlobalMut = { value: number };
-
 interface WKernel {
-    memory: { buffer: ArrayBuffer };
+    memory: WebAssembly.Memory;
 
-    ConvMaxSize: WGlobalMut;
-    offset_arg: WGlobalMut;
-    offset_scratch: WGlobalMut;
-    offset_cwei: WGlobalMut;
-    offset_cbr: WGlobalMut;
-    offset_kernsc: WGlobalMut;
-    memory_pages: WGlobalMut;
-    kernel_precision: WGlobalMut;
-    CVSz: WGlobalMut;
-    convolution_threshold: WGlobalMut;
+    ConvMaxSize: WebAssembly.Global;
+    offset_arg: WebAssembly.Global;
+    offset_scratch: WebAssembly.Global;
+    offset_cwei: WebAssembly.Global;
+    offset_cbr: WebAssembly.Global;
+    offset_kernsc: WebAssembly.Global;
+    memory_pages: WebAssembly.Global;
+    kernel_precision: WebAssembly.Global;
+    CVSz: WebAssembly.Global;
+    convolution_threshold: WebAssembly.Global;
 
     initialize (precision: number): number;
 

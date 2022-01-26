@@ -7,10 +7,11 @@ const { test_start_module, test_print_summary, test_print_summary_on_exit,
         $time, check, CurrentTestEnv } = require('../tools/tester.js');
 
 const fwasm = CurrentTestEnv.wasm_test_module_path_for('kernel.wat');
+const wasmdata = require(fwasm);
 
 let wmemory, arg_off, arr_args, arr_ws, arr_br;
 
-let [winst, offsets, opts] = winit.load_wasm(fwasm, (off) => {
+let [winst, offsets, opts] = winit.load_wasm(wasmdata, (off) => {
     offsets = off;
     wmemory = offsets.memory;
     arg_off = offsets.offset_arg;
@@ -61,7 +62,7 @@ function store_result3 (size, dst, idx, src, f=id, ridx=reidx, iidx=imidx) {
 }
 
 const test = test_start_module(`Convolution (WebAssembly) tests`,
-                               `loading: ${path.relative(process.cwd(), fwasm)}`);
+                               `loaded: ${path.relative(process.cwd(), fwasm)}`);
 
 // ----- Initialisation -----
 
@@ -179,4 +180,4 @@ $time(() => {
     arr_args.copyWithin(arg_off, scr_off, scr_off + sizer * 2);
     wfns.convolve(arg_off, arg_off + (sizer * 8), sizer);
     return arr_args[1];
-}, `convolve ${sizer} x Float64 x 2`, 2);
+}, `convolve ${sizer} x Float64 x 2`);

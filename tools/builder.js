@@ -116,7 +116,6 @@ function findcommands() {
 const sizeunit = unitref([[1.0, 'B'], [1.0e3, 'KB'], [1.0e6, 'MB'], [1.0e9, 'GB']]);
 
 function run_capture_stderr(cmd, args) {
-    fs.mkdirSync(testtempdir, { recursive: true });
     let proc_errfile = path.join(testtempdir, 'err.tmp');
     let proc_errfd = fs.openSync(proc_errfile, 'w');
     let errout;
@@ -193,9 +192,32 @@ function print_errors(d, filename, type) {
     console.error('');
 }
 
-function buildwasm(infile) {
-    const header = () => console.info(`[BUILD]: ${cfile(infile)}`);
-    const [outfile, outoptfile] = wasm_filenames(infile);
+function wasm_filenames(watfile) {
+    const tfp = path.parse(watfile);
+    const temp_wasmfile = path.join(testtempdir, tfp.name + '.wasm');
+    const out_jsfile = path.join(tfp.dir, tfp.name + '_wasm' + '.js');
+    return [temp_wasmfile, out_jsfile];
+}
+
+const relpath_cwd = p => path.relative(process.cwd(), p);
+
+function inline_wasm (wasmfile, outfile, format = 'esm') {
+    let data = fs.readFileSync(wasmfile, 'base64');
+    let code = (`const bindata = atob("${data}");\n`
+        + `const buffer = Uint8Array.from(bindata, c => c.charCodeAt(0));\n`);
+    if (format === 'esm') {
+        code = code + 'export default buffer;\n';
+    } else {
+        // Assume commonjs format for nodejs.
+        code = code + 'module.exports = buffer;\n';
+    }
+    fs.writeFileSync(outfile, code);
+}
+
+function buildwasm(infile, wasm_module_format='esm') {
+    const [outfile, outjsfile] = wasm_filenames(infile);
+    const header = () => console.info(`[BUILD]: ${cfile(relpath_cwd(infile))}`
+                                      + ` -> ${cfile(relpath_cwd(outjsfile))}`);
     let errd_compile, errd_opt;
     errd_compile = run_capture_stderr(cmdwat2wasm, ['-o', outfile, infile]);
     if (errd_compile) {
@@ -204,23 +226,26 @@ function buildwasm(infile) {
         print_errors(errd_compile, infile, 'wat2wasm');
     } else {
         let size = fs.statSync(outfile).size;
-        errd_opt = run_capture_stderr(cmdwasmopt, [...cmdwasmopt_opts, '-o', outoptfile, outfile]);
+        errd_opt = run_capture_stderr(cmdwasmopt, [...cmdwasmopt_opts, '-o', outfile, outfile]);
         if (errd_opt) {
             header();
             print_errors(errd_opt, outfile, 'wasm-opt');
         } else {
+            let sizeopt = fs.statSync(outfile).size;
+            inline_wasm(outfile, outjsfile, wasm_module_format);
+            let sizejs = fs.statSync(outjsfile).size;
             header();
-            let sizeopt = fs.statSync(outoptfile).size;
             let c = (size === sizeopt) ? (x => x) : (size < sizeopt ? closs : cgain);
             let pcnt = c(' ' + ((sizeopt - size) * 100 / size).toFixed(1) + '% ');
-            console.info(indent(`${sizeunit(size)} -> ${sizeunit(sizeopt)} (${pcnt})`, 9));
+            console.info(indent(`${sizeunit(size)} -> ${sizeunit(sizeopt)} (${pcnt}) `
+                                + `| js: ${sizeunit(sizejs)}`, 9));
         }
     }
     const stat = (errd_compile || errd_opt);
     if (stat) {
         console.error(`${closs('[!]')} Errors while building WebAssembly module\n`);
     }
-    return [!stat, outfile, outoptfile];
+    return [!stat, outjsfile];
 }
 
 function handle_set_files(opts) {
@@ -254,20 +279,13 @@ function handle_set_files(opts) {
     return true;
 }
 
-function wasm_filenames(watfile) {
-    let tfp = path.parse(watfile);
-    return [path.join(tfp.dir, tfp.name + '.wasm')
-            , path.join(tfp.dir, tfp.name + '.wasm')];
-    // , path.join(tfp.dir, tfp.name + 'opt.wasm')];
-}
-
 function handle_clean(opts) {
     if (opts.args['-c'].value) {
         fs.rmSync(testtempdir, { recursive: true, force: true });
         const watfile = opts.args['-s'].value;
-        const [outfile, outoptfile] = wasm_filenames(watfile);
-        fs.rmSync(outfile, { recursive: true, force: true });
-        fs.rmSync(outoptfile, { recursive: true, force: true });
+        for(let f of wasm_filenames(watfile)) {
+            fs.rmSync(f , { force: true });
+        }
     }
     return true;
 }
@@ -275,8 +293,9 @@ function handle_clean(opts) {
 function handle_build(opts, _build_js = false, _force=false) {
     let ret = true;
     if (opts.args['-b'].value || _force) {
+        fs.mkdirSync(testtempdir, { recursive: true });
         const watfile = opts.args['-s'].value;
-        const [stat, wasmfile, wasmoptfile] = buildwasm(watfile);
+        const [stat, _] = buildwasm(watfile);
         ret = stat;
         if (_build_js && ret) {
             try {
@@ -300,15 +319,15 @@ function handle_test(opts) {
         const test_watfile = path.join(testtempdir, path.basename(watfile));
         fs.copyFileSync(watfile, test_watfile);
         testbuild_wasm_export_functions(test_watfile, watfile);
-        const [stat, test_wasmfile, test_wasmoptfile] = buildwasm(test_watfile);
+        const [stat, test_outfile] = buildwasm(test_watfile, 'cjs');
         ret = stat;
         if (!opts.args['-b'].value) {
             // We need to do a normal build also, because the JS build may fail.
             handle_build(opts, true, true);
         }
         // Do the test
-        const tester = path.relative(process.cwd(), opts.args['-d'].value);
-        const testopts = `-w ${path.basename(watfile)} -m ${test_wasmoptfile}`;
+        const tester = relpath_cwd(opts.args['-d'].value);
+        const testopts = `-w ${path.basename(watfile)} -m ${test_outfile}`;
         try {
             cproc.execSync(`node ${tester} ${testopts}`, {
                 stdio: ['inherit', 'inherit', 'inherit']
@@ -331,7 +350,7 @@ function handle_watch(opts) {
     };
     if (opts.args['-w'].value) {
         watching = true;
-        let wfile = path.relative(process.cwd(), opts.args['-s'].value);
+        let wfile = relpath_cwd(opts.args['-s'].value);
         chokidar.watch(wfile).on('all', (event, path) => {
             dispatch_build();
         }).on('error', function(error) {
