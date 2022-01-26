@@ -39,14 +39,24 @@ exports.alignc = (s, w) => s.split(/\r?\n/).map(l => {
 
 // Units must be an array of pairs in the form [multiplier, unit-string], sorted in
 // increasing order of multipliers.
-exports.unitref = curry((units, v) => {
+exports.unitref = curry((units, np, v) => {
     v = Number(v);
-    for (let i = 0, j = 0; i < 4; j=i, ++i) {
+    for (let i = 0, j = 0; i < units.length; j=i, ++i) {
         if ((v / units[i][0]) < 1) {
-            return (v / units[j][0]).toFixed(2) + units[j][1];
+            return (v / units[j][0]).toFixed(np) + units[j][1];
         }
     }
-    return v.toFixed(2) + units[0][1];
+    return v.toFixed(np) + units[0][1];
+});
+
+exports.unitref_s = curry((units, np, v) => {
+    v = Number(v);
+    for (let i = 0, j = 0; i < units.length; j=i, ++i) {
+        if ((v / units[i][0]) < 1) {
+            return [(v / units[j][0]).toFixed(np), units[j][1]];
+        }
+    }
+    return [v.toFixed(np), units[0][1]];
 });
 
 exports.print_labelled = (initindent, label, val='', gap=0, extraindent=0, is_err=false) => {

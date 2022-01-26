@@ -113,7 +113,7 @@ function findcommands() {
     }
 }
 
-const sizeunit = unitref([[1.0, 'B'], [1.0e3, 'KB'], [1.0e6, 'MB'], [1.0e9, 'GB']]);
+const sizeunit = unitref([[1.0, 'B'], [1.0e3, 'KB'], [1.0e6, 'MB'], [1.0e9, 'GB']], 2);
 
 function run_capture_stderr(cmd, args) {
     let proc_errfile = path.join(testtempdir, 'err.tmp');
@@ -214,10 +214,14 @@ function inline_wasm (wasmfile, outfile, format = 'esm') {
     fs.writeFileSync(outfile, code);
 }
 
-function buildwasm(infile, wasm_module_format='esm') {
+function buildwasm(infile, wasm_module_format='esm', debug_mode = false) {
     const [outfile, outjsfile] = wasm_filenames(infile);
     const header = () => console.info(`[BUILD]: ${cfile(relpath_cwd(infile))}`
                                       + ` -> ${cfile(relpath_cwd(outjsfile))}`);
+    let wat2wasmopts = ['-o', outfile, infile];
+    if (debug_mode) {
+        wat2wasmopts.unshift('--debug-names');
+    }
     let errd_compile, errd_opt;
     errd_compile = run_capture_stderr(cmdwat2wasm, ['-o', outfile, infile]);
     if (errd_compile) {
@@ -226,7 +230,9 @@ function buildwasm(infile, wasm_module_format='esm') {
         print_errors(errd_compile, infile, 'wat2wasm');
     } else {
         let size = fs.statSync(outfile).size;
-        errd_opt = run_capture_stderr(cmdwasmopt, [...cmdwasmopt_opts, '-o', outfile, outfile]);
+        if (!debug_mode) {
+            errd_opt = run_capture_stderr(cmdwasmopt, [...cmdwasmopt_opts, '-o', outfile, outfile]);
+        }
         if (errd_opt) {
             header();
             print_errors(errd_opt, outfile, 'wasm-opt');
@@ -238,7 +244,8 @@ function buildwasm(infile, wasm_module_format='esm') {
             let c = (size === sizeopt) ? (x => x) : (size < sizeopt ? closs : cgain);
             let pcnt = c(' ' + ((sizeopt - size) * 100 / size).toFixed(1) + '% ');
             console.info(indent(`${sizeunit(size)} -> ${sizeunit(sizeopt)} (${pcnt}) `
-                                + `| js: ${sizeunit(sizejs)}`, 9));
+                                + `| js: ${sizeunit(sizejs)}`
+                                + ` ${debug_mode ? '(debug)' : ''}`, 9));
         }
     }
     const stat = (errd_compile || errd_opt);
@@ -295,7 +302,7 @@ function handle_build(opts, _build_js = false, _force=false) {
     if (opts.args['-b'].value || _force) {
         fs.mkdirSync(testtempdir, { recursive: true });
         const watfile = opts.args['-s'].value;
-        const [stat, _] = buildwasm(watfile);
+        const [stat, _] = buildwasm(watfile, 'esm', opts.args['-g'].value);
         ret = stat;
         if (_build_js && ret) {
             try {
@@ -406,6 +413,11 @@ if (require.main === module) {
                     value: path.resolve(__dirname, 'tester.js'),
                     arg: '<file>',
                     help_sort_key: 40,
+                },
+                '-g': {
+                    description: "Debug mode",
+                    value: false,
+                    help_sort_key: 45,
                 },
                 '-c': {
                     description: "Clean built files",

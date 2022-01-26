@@ -2,7 +2,7 @@ const process = require('process');
 const fs = require('fs');
 const path = require('path');
 const argparse = require('./utils/argparse.js');
-const { clear, indent, unitref } = require('./utils/format.js');
+const { clear, indent, unitref_s } = require('./utils/format.js');
 
 const test_directory = path.resolve(__dirname, '../test');
 const exclude_patterns = [/\.git$/, /node_modules/, /dist/, /\.?build$/, /\.?test_build$/];
@@ -326,14 +326,49 @@ exports.test_print_summary_on_exit = test_print_summary_on_exit;
 // -----------------------------------------------------------------------------
 
 function _sepint (n) {
-    let ds = [...(`${Math.floor(n)}`)];
-    for (let i = ds.length - 3; i > 0; i -= 3) {
-        ds.splice(i, 0, ",");
+    if (n < 100) {
+        return n.toFixed(2);
+    } else {
+        let ds = [...(`${Math.floor(n)}`)];
+        for (let i = ds.length - 3; i > 0; i -= 3) {
+            ds.splice(i, 0, ",");
+        }
+        return ds.join('');
     }
-    return ds.join('');
 }
 
-const timeunit = unitref([[1.0, 'ns'], [1.0e3, 'µs'], [1.0e6, 'ms'], [1.0e9, 's']]);
+const timeunit = unitref_s([[1.0, 'ns'], [1.0e3, 'µs'], [1.0e6, 'ms'], [1.0e9, 's']], 1);
+
+const median_sorted = (arr, na=0, n=-1) => {
+    n = n < 0 ? arr.length : n;
+    n = n - na;
+    if (n === 0) {
+        return 0;
+    }
+    let h = n / 2;
+    if (n % 2 === 0) {
+        return (arr[na + h - 1] + arr[na + h]) / 2;
+    } else {
+        return arr[na + Math.floor(h)];
+    }
+};
+
+// arr: BigInt[]
+const quartiles = (arr) => {
+    let n = arr.length;
+    let m = median_sorted(arr.sort((a, b) => a - b));
+    let h = n / 2;
+    if (n % 2 === 0) {
+        return [median_sorted(arr, 0, h), m, median_sorted(arr, h, n)];
+    } else {
+        let h = n / 2;
+        return [
+            median_sorted(arr, 0, Math.ceil(h)),
+            m,
+            median_sorted(arr, Math.floor(h), n),
+        ];
+    }
+};
 
 const timestamp =  process.hrtime.bigint;
 
@@ -354,33 +389,46 @@ exports.$time = function (f, name) {
     name = (name == null)? f.name : name;
     console.info(indent(`\n` + E.fg.blu(`[PERF]`) + ` ${name}`, E.indent));
     // ----- Warmup -----
-    let ret = 0;
     let durns = 1e9;
     let tbegin = timestamp();
-    do {
-        ret += f();
-    } while ((timestamp() - tbegin) <= durns);
-    // ----- Benchmark -----
     let count = 0;
-    let readings = [];
-    tbegin = timestamp();
     do {
-        let t0 = timestamp();
-        ret += f();
-        readings.push(timestamp() - t0);
+        f();
         ++count;
     } while ((timestamp() - tbegin) <= durns);
-    let ops = _sepint(count);
-    let median;
-    readings.sort();
-    if (count % 2 === 0) {
-        median = readings[(count / 2)];
-    } else {
-        median = ((readings[Math.floor(count / 2)] + readings[Math.ceil(count / 2)])
-                  / BigInt(2));
+    let samplei = Math.max(1, Math.trunc(count * 0.01));
+    // ----- Benchmark -----
+    let readings = [];
+    tbegin = timestamp();
+    let actualdur;
+    count = 0;
+    do {
+        f();
+        ++count;
+        if (count % samplei === 0) {
+            let t0 = timestamp();
+            f();
+            readings.push(Number(timestamp() - t0));
+            ++count;
+        }
+        actualdur = (timestamp() - tbegin);
+    } while (actualdur <= durns);
+    actualdur = Number(actualdur) / 1.0e9;
+    let ops = _sepint(count / actualdur);
+    let [qrt1, qrt2, qrt3] = quartiles(readings);
+    let [qn1, qu1] = timeunit(qrt1);
+    let [qn2, qu2] = timeunit(qrt2);
+    let [qn3, qu3] = timeunit(qrt3);
+    if (!(qu1 === qu2 && qu2 === qu3)) {
+        let qn1 = qn1 + qu1;
+        let qn2 = qn2 + qu2;
+        let qn3 = qn3 + qu3;
+        qu1 = '';
     }
-    console.info(indent(`${ops} ops/s  (median: ${timeunit(median)})`, E.indent + 7));
-    return ret;
+    console.info(indent(`${ops} ops/s    `
+                        + `|--[${qn1} ${E.bg.blk(qn2 + qu1)} ${qn3}]--|`
+                        , E.indent + 7));
+    return count;
 };
 
 
