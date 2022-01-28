@@ -44,4 +44,6 @@ interface WKernel {
     convolve (aidx: number, bidx: number, size: number): void;
 
     frexp (x: number, expidx: number): number;
+
+    trunc32 (x: number): number;
 }

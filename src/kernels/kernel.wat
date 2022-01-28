@@ -926,14 +926,18 @@
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $kprec))
          (then
-          (i32.load (call $i32idx (local.get $src*) (local.get $i)))
-          i64.extend_i32_u
-          (i64.extend_i32_u (local.get $multiplier))
-          i64.mul
-          (local.tee $v)
-          (i64.and (i64.const 0xFFFFFFFF))
-          i32.wrap_i64
-          (i32.store (call $i32idx (local.get $man*) (local.get $i)))
+          (local.set
+           $v
+           (i64.add
+            (local.get $v)
+            (i64.mul
+             (i64.extend_i32_u
+              (i32.load (call $i32idx (local.get $src*) (local.get $i))))
+             (i64.extend_i32_u (local.get $multiplier)))))
+          (i32.store
+           (call $i32idx (local.get $man*) (local.get $i))
+           (i32.wrap_i64
+            (i64.and (local.get $v) (i64.const 0xFFFFFFFF))))
           (local.set $v (i64.shr_u (local.get $v) (i64.const 32)))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
@@ -1032,6 +1036,7 @@
 
 
  ;; TODO: Audit kernel methods:
+ ;;       - Check all stores (argument order! sub_man_bscaled etc. for example)
  ;;       - signed vs unsigned variables and operations and comparisons
  ;;       - Loops and branching
 
@@ -1473,6 +1478,10 @@
       (f64.reinterpret_i64 (i64.or (i64.and (local.get $i)
                                             (i64.const 0x800fffffffffffff))
                                    (i64.const 0x3fe0000000000000))))))
+
+ (func $trunc32 (export "trunc32")
+   (param $x f64) (result i32)
+   (i32.wrap_i64 (i64.trunc_f64_s (local.get $x))))
 
 
  ;; ============================================================================
