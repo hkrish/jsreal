@@ -6,6 +6,7 @@ class Kernel {
     internal: WKernel;
     mem_dv: DataView;
     mem_u32: Uint32Array;
+    mem_i32: Int32Array;
     mem_f64: Float64Array;
     layout: {
         ConvMaxSize: number,
@@ -23,6 +24,7 @@ class Kernel {
         this.internal = <WKernel><unknown>undefined;
         this.mem_dv = <DataView><unknown>undefined;
         this.mem_u32 = <Uint32Array><unknown>undefined;
+        this.mem_i32 = <Int32Array><unknown>undefined;
         this.mem_f64 = <Float64Array><unknown>undefined;
         this.layout = {
             ConvMaxSize: -1,
@@ -58,6 +60,26 @@ class Kernel {
         };
     }
 
+    write_mantissa_arg (x: Uint32Array, bidx?: number): number {
+        bidx = bidx == null ? this.layout.offset_arg : bidx;
+        let idx = bidx / 4;
+        let nx = x.length;
+        for (let i = 0; i < nx; ++i) {
+            this.mem_u32[idx + i] = x[i];
+        }
+        return bidx + nx * 4;
+    }
+
+    read_mantissa_arg (x: Uint32Array, bidx?: number): number {
+        bidx = bidx == null ? this.layout.offset_arg : bidx;
+        let idx = bidx / 4;
+        let nx = x.length;
+        for (let i = 0; i < nx; ++i) {
+            x[i] = this.mem_u32[idx + i];
+        }
+        return bidx + nx * 4;
+    }
+
     // ----- Callback from wasm module.: read current memory offsets -----
     private on_change_offsets (): void {
         this.layout.offset_arg = this.internal.offset_arg.value;
@@ -71,6 +93,7 @@ class Kernel {
         this._precision = this.internal.kernel_precision.value;
         this.mem_dv = new DataView(this.internal.memory.buffer);
         this.mem_u32 = new Uint32Array(this.internal.memory.buffer);
+        this.mem_i32 = new Int32Array(this.internal.memory.buffer);
         this.mem_f64 = new Float64Array(this.internal.memory.buffer);
     }
 
