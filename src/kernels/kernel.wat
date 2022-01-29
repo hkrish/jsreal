@@ -40,10 +40,6 @@
 
  ;; Internal constants
  (global $PI2   f64  (f64.const 0x1.921fb54442d18p+2))
- (global $PI    f64  (f64.const 0x1.921fb54442d18p+1))
- (global $PI/2  f64  (f64.const 0x1.921fb54442d18p+0))
- (global $RAD   f64  (f64.const 0x1.1df46a2529d39p-6))
-
 
  ;; ============================================================================
  ;; ----- Memory layout -----
@@ -56,7 +52,7 @@
      (local $offset i32) (local $pages i32)
      ;; ----- These are hard-coded for now -----
      (local.set $min-prec (i32.const 2048))
-     (local.set $max-args (i32.const 4))
+     (local.set $max-args (i32.const 8))
      (if (i32.lt_u (local.get $prec2pow) (local.get $min-prec))
          (then (local.set $prec2pow (local.get $min-prec)))
        (else
@@ -140,12 +136,12 @@
  (func $conv-size
      (param $prec i32) (result i32)
      (local $p4 i32) (local $p2p i32)
-     (local.set $p4 (i32.shl (local.get $prec) (i32.const 2)))
      (local.set $p2p (i32.const 16))
+     (local.set $p4 (i32.mul (local.get $prec) (i32.const 4)))
      (loop $cont
        (if (i32.lt_u (local.get $p2p) (local.get $p4))
            (then
-            (local.set $p2p (i32.shl (local.get $p2p) (i32.const 1)))
+            (local.set $p2p (i32.mul (local.get $p2p) (i32.const 2)))
             (br $cont))))
      (local.get $p2p))
 
@@ -158,6 +154,10 @@
    (local $kprec i32) (local $prec i32) (local $j i32)
    (local.set $kprec (global.get $KERNPREC))
    (local.set $prec (i32.sub (local.get $kprec) (i32.const 1)))
+   (if (i32.load (call $i32idx (local.get $man*) (local.get $prec)))
+       (return (i32.const 0)))
+   ;; find the first non-zero word
+   (local.set $prec (i32.sub (local.get $prec) (i32.const 1)))
    (loop $cont
      (if (i32.and (i32.ge_s (local.get $prec) (i32.const 0))
                   (i32.eqz (i32.load (call $i32idx (local.get $man*)
@@ -165,7 +165,9 @@
          (then
           (local.set $prec (i32.sub (local.get $prec) (i32.const 1)))
           (br $cont))))
+   ;; calculate needed offset
    (local.set $prec (i32.sub (local.get $kprec) (i32.add (local.get $prec) (i32.const 1))))
+   ;; do we have something to save?
    (if (i32.ne (local.get $prec) (local.get $kprec))
        (then
         (memory.copy (call $i32idx (local.get $man*) (local.get $prec))
@@ -194,27 +196,29 @@
    (if (i32.and (i32.ne (local.get $start) (i32.const 0))
                 (i32.le_u (local.get $start) (local.get $kprec)))
        (then
-        (i32.load (call $i32idx (local.get $part*)
-                        (i32.sub (local.get $start) (i32.const 1))))
-        (i32.shl (i32.const 1) (i32.const 31))
-        i32.ge_u
-        i64.extend_i32_u
-        local.set $carry))
+        (local.set
+         $carry
+         (i64.extend_i32_u
+          (i32.ge_u
+           (i32.load (call $i32idx (local.get $part*)
+                           (i32.sub (local.get $start) (i32.const 1))))
+           (i32.shl (i32.const 1) (i32.const 31)))))))
    (local.set $kpms (i32.sub (local.get $kprec) (local.get $start)))
    (local.set $u (i32.const 0))
    ;; Add words
    (loop $cont
      (if (i32.le_u (local.get $u) (local.get $kpms))
          (then
-          (i64.extend_i32_u (i32.load (call $i32idx (local.get $full*) (local.get $u))))
-          (i64.extend_i32_u (i32.load (call $i32idx (local.get $part*)
-                                            (i32.add (local.get $u) (local.get $start)))))
-          local.get $carry
-          i64.add
-          i64.add
-          local.tee $v
-          i32.wrap_i64
-          (i32.store (call $i32idx (local.get $man*) (local.get $u)))
+          (local.set
+           $v
+           (i64.add
+            (i64.extend_i32_u (i32.load (call $i32idx (local.get $full*) (local.get $u))))
+            (i64.add
+             (i64.extend_i32_u (i32.load (call $i32idx (local.get $part*)
+                                               (i32.add (local.get $u) (local.get $start)))))
+             (local.get $carry))))
+          (i32.store (call $i32idx (local.get $man*) (local.get $u))
+                     (i32.wrap_i64 (local.get $v)))
           (local.set $carry (i64.shr_u (local.get $v) (i64.const 32)))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
@@ -223,11 +227,12 @@
      (if (i32.and (i64.ne (local.get $carry) (i64.const 0))
                   (i32.lt_u (local.get $u) (local.get $kprec)))
          (then
-          (i32.add
-           (i32.load (call $i32idx (local.get $full*) (local.get $u)))
-           (i32.wrap_i64 (local.get $carry)))
-          local.tee $kpms
-          (i32.store (call $i32idx (local.get $man*) (local.get $u)))
+          (i32.store
+           (call $i32idx (local.get $man*) (local.get $u))
+           (local.tee $kpms
+                      (i32.add
+                       (i32.load (call $i32idx (local.get $full*) (local.get $u)))
+                       (i32.wrap_i64 (local.get $carry)))))
           (local.set $carry (i64.extend_i32_u (i32.eqz (local.get $kpms))))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
@@ -264,7 +269,7 @@
           (local.set $tmp1 (call $i32idx (local.get $man*) (local.get $u)))
           (local.set $tmp2 (i32.add (i32.load (local.get $tmp1)) (i32.const 1)))
           (i32.store (i32.sub (local.get $tmp1) (i32.const 4)) (local.get $tmp2))
-          (local.set $carry (i32.eq (local.get $tmp2) (i32.const 0)))
+          (local.set $carry (i32.eqz (local.get $tmp2)))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
    (loop $cont
@@ -275,14 +280,14 @@
           (i32.store (i32.sub (local.get $tmp1) (i32.const 4)) (local.get $tmp2))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
-   (local.set $u (i32.sub (local.get $u) (i32.const 1)))
    ;; put new value
+   (local.set $u (i32.sub (local.get $u) (i32.const 1)))
    (local.set $tmp1 (i32.add (local.get $msw) (local.get $carry)))
    (i32.store (call $i32idx (local.get $man*) (local.get $u)) (local.get $tmp1))
    ;; iterate again, if necessary
    (if (result i32) (i32.eqz (local.get $tmp1))
      (then
-      (i32.add (call $adjust_for_carry (local.get $man*) (i32.const 1)) (i32.const 1)))
+      (i32.add (i32.const 1) (call $adjust_for_carry (local.get $man*) (i32.const 1))))
      (else (i32.const 1))))
 
  ;; mantissa_sub: Perform the actual subtraction.
@@ -302,29 +307,32 @@
    (if (i32.and (i32.ne (local.get $start) (i32.const 0))
                 (i32.le_u (local.get $start) (local.get $kprec)))
        (then
-        (i32.load (call $i32idx (local.get $part*)
-                        (i32.sub (local.get $start) (i32.const 1))))
-        (i32.shl (i32.const 1) (i32.const 31))
-        i32.ge_u
-        i64.extend_i32_u
-        local.set $carry))
+        (local.set $carry
+                   (i64.extend_i32_u
+                    (i32.ge_u
+                     (i32.load (call $i32idx (local.get $part*)
+                                     (i32.sub (local.get $start) (i32.const 1))))
+                     (i32.shl (i32.const 1) (i32.const 31)))))))
+   ;; Subtract words
    (local.set $kpms (i32.sub (local.get $kprec) (local.get $start)))
    (local.set $u (i32.const 0))
-   ;; Subtract words
    (loop $cont
-     (if (i32.le_u (local.get $u) (local.get $kpms))
+     (if (i32.lt_u (local.get $u) (local.get $kpms))
          (then
-          (i64.extend_i32_u (i32.load (call $i32idx (local.get $full*) (local.get $u))))
-          (i64.extend_i32_u (i32.load (call $i32idx (local.get $part*)
-                                            (i32.add (local.get $u) (local.get $start)))))
-          i64.sub
-          local.get $carry
-          i64.sub
-          local.tee $v
-          i32.wrap_i64
-          (i32.store (call $i32idx (local.get $man*) (local.get $u)))
+          (i32.store
+           (call $i32idx (local.get $man*) (local.get $u))
+           (i32.wrap_i64
+            (local.tee
+             $v
+             (i64.sub
+              (i64.sub
+               (i64.extend_i32_u (i32.load (call $i32idx (local.get $full*) (local.get $u))))
+               (i64.extend_i32_u (i32.load (call $i32idx (local.get $part*)
+                                                 (i32.add (local.get $u) (local.get $start))))))
+              (local.get $carry)))))
           (local.set $carry (i64.extend_i32_u
-                             (i64.gt_u (local.get $v) (i64.const 0xffffffff))))
+                             (i64.ne (i64.shr_u (local.get $v) (i64.const 32))
+                                     (i64.const 0))))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
    ;; Update for carry
@@ -332,11 +340,12 @@
      (if (i32.and (i64.ne (local.get $carry) (i64.const 0))
                   (i32.lt_u (local.get $u) (local.get $kprec)))
          (then
-          (i32.sub
-           (i32.load (call $i32idx (local.get $full*) (local.get $u)))
-           (i32.wrap_i64 (local.get $carry)))
-          local.tee $kpms
-          (i32.store (call $i32idx (local.get $man*) (local.get $u)))
+          (i32.store (call $i32idx (local.get $man*) (local.get $u))
+                     (local.tee
+                      $kpms
+                      (i32.sub
+                       (i32.load (call $i32idx (local.get $full*) (local.get $u)))
+                       (i32.wrap_i64 (local.get $carry)))))
           (local.set $carry (i64.extend_i32_u (i32.eq (local.get $kpms) (i32.const -1))))
           (local.set $u (i32.add (local.get $u) (i32.const 1)))
           (br $cont))))
@@ -350,7 +359,7 @@
           (br $cont))))
    (i64.ne (local.get $carry) (i64.const 0)))
 
- ;; mantissa_neg: negate a mantissa. needed if SubMantissa returned true.
+ ;; mantissa_neg: negate a mantissa. needed if $mantissa_sub returned true.
  (func $mantissa_neg (export "mantissa_neg")
    (param $man* i32)
    (local $prec i32) (local $u i32) (local $tmp i32)
@@ -389,14 +398,14 @@
      (local.set $carry (i32.const 0))
      (local.set $u (i64.const 0))
      (local.set $w (i64.const 0))
-     (local.set $i (i32.sub (local.get $kprec)
-                            (i32.add (i32.shr_u (local.get $inlen) (i32.const 1))
-                                     (i32.const 1))))
+     (local.set $i (i32.add (i32.sub (local.get $kprec)
+                                     (i32.mul (local.get $inlen) (i32.const 2)))
+                            (i32.const 1)))
      (local.set $k (i32.const 0))
      ;; start by only calculating carry
      (loop $cont-i
-       (if (i32.and (i32.lt_u (local.get $i) (i32.const 0))
-                    (i32.lt_u (local.get $k) (local.get $inlen)))
+       (if (i32.and (i32.lt_s (local.get $i) (i32.const 0))
+                    (i32.lt_s (local.get $k) (local.get $inlen)))
            (then
             (local.set $w (i64.shr_u (local.get $w) (i64.const 32)))
             (local.set $w (i64.add (local.get $w)
@@ -407,21 +416,20 @@
             (loop $cont-j
               (if (i32.le_u (local.get $j) (local.get $k))
                   (then
-                   (i32.load (call $i32idx (local.get $a*)
-                                   (i32.add (local.get $j) (local.get $instart))))
-                   i64.extend_i32_u
-                   (i32.load (call $i32idx (local.get $b*)
-                                   (i32.add (i32.sub (local.get $k) (local.get $j))
-                                            (local.get $instart))))
-                   i64.extend_i32_u
-                   i64.mul
-                   (local.tee $u)
-                   (local.get $w)
-                   i64.add
-                   (local.tee $w)
-                   (local.get $u)
-                   i64.lt_u
-                   (if (then (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
+                   (local.set
+                    $u
+                    (i64.mul
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $a*)
+                                      (i32.add (local.get $j) (local.get $instart)))))
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $b*)
+                                      (i32.add (i32.sub (local.get $k) (local.get $j))
+                                               (local.get $instart)))))))
+                   (local.set $w (i64.add (local.get $w) (local.get $u)))
+                   (if (i64.lt_s (local.get $w) (local.get $u))
+                       (then
+                        (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
                    (local.set $j (i32.add (local.get $j) (i32.const 1)))
                    (br $cont-j))))
             (local.set $i (i32.add (local.get $i) (i32.const 1)))
@@ -430,12 +438,15 @@
      ;; alternatively
      (local.set $j (i32.const 0))
      (loop $cont
-       (if (i32.lt_u (local.get $j) (local.get $i))
-           (i32.store (call $i32idx (local.get $man*) (local.get $j)) (i32.const 0))
-         (local.set $j (i32.add (local.get $j) (i32.const 1)))))
+       (if (i32.lt_s (local.get $j) (local.get $i))
+           (then
+            (i32.store (call $i32idx (local.get $man*) (local.get $j)) (i32.const 0))
+            (local.set $j (i32.add (local.get $j) (i32.const 1)))
+            (br $cont))))
      ;; assert: (i >= 0)
-     ;; we didn't write till now.
-     ;; besides carry, we should add 1 if the previous value had 1 in MS bit
+     ;;
+     ;; we didn't write till now. Besides carry, we should add 1 if the previous value had
+     ;; 1 in MS bit
      (if (i64.ne (i64.and (local.get $w) (i64.const 0x80000000)) (i64.const 0))
          (local.set $w (i64.add (local.get $w) (i64.shl (i64.const 1) (i64.const 32)))))
      ;; start writing
@@ -451,21 +462,20 @@
             (loop $cont-j
               (if (i32.le_u (local.get $j) (local.get $k))
                   (then
-                   (i32.load (call $i32idx (local.get $a*)
-                                   (i32.add (local.get $j) (local.get $instart))))
-                   i64.extend_i32_u
-                   (i32.load (call $i32idx (local.get $b*)
-                                   (i32.add (i32.sub (local.get $k) (local.get $j))
-                                            (local.get $instart))))
-                   i64.extend_i32_u
-                   i64.mul
-                   (local.tee $u)
-                   (local.get $w)
-                   i64.add
-                   (local.tee $w)
-                   (local.get $u)
-                   i64.lt_u
-                   (if (then (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
+                   (local.set
+                    $u
+                    (i64.mul
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $a*)
+                                      (i32.add (local.get $j) (local.get $instart)))))
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $b*)
+                                      (i32.add (i32.sub (local.get $k) (local.get $j))
+                                               (local.get $instart)))))))
+                   (local.set $w (i64.add (local.get $w) (local.get $u)))
+                   (if (i64.lt_s (local.get $w) (local.get $u))
+                       (then
+                        (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
                    (local.set $j (i32.add (local.get $j) (i32.const 1)))
                    (br $cont-j))))
             (i32.store (call $i32idx (local.get $man*) (local.get $i))
@@ -484,23 +494,22 @@
             (local.set $j (i32.add (i32.sub (local.get $k) (local.get $inlen))
                                    (i32.const 1)))
             (loop $cont-j
-              (if (i32.le_u (local.get $j) (local.get $inlen))
+              (if (i32.lt_u (local.get $j) (local.get $inlen))
                   (then
-                   (i32.load (call $i32idx (local.get $a*)
-                                   (i32.add (local.get $j) (local.get $instart))))
-                   i64.extend_i32_u
-                   (i32.load (call $i32idx (local.get $b*)
-                                   (i32.add (i32.sub (local.get $k) (local.get $j))
-                                            (local.get $instart))))
-                   i64.extend_i32_u
-                   i64.mul
-                   (local.tee $u)
-                   (local.get $w)
-                   i64.add
-                   (local.tee $w)
-                   (local.get $u)
-                   i64.lt_u
-                   (if (then (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
+                   (local.set
+                    $u
+                    (i64.mul
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $a*)
+                                      (i32.add (local.get $j) (local.get $instart)))))
+                     (i64.extend_i32_u
+                      (i32.load (call $i32idx (local.get $b*)
+                                      (i32.add (i32.sub (local.get $k) (local.get $j))
+                                               (local.get $instart)))))))
+                   (local.set $w (i64.add (local.get $w) (local.get $u)))
+                   (if (i64.lt_s (local.get $w) (local.get $u))
+                       (then
+                        (local.set $carry (i32.add (local.get $carry) (i32.const 1)))))
                    (local.set $j (i32.add (local.get $j) (i32.const 1)))
                    (br $cont-j))))
             (i32.store (call $i32idx (local.get $man*) (local.get $i))
@@ -522,7 +531,7 @@
    (local $bufa i32) (local $bufb i32) (local $prec i32) (local $prec2pow i32)
    (local $i i32) (local $tmp1 i32) (local $tmp2 i32) (local $carry f64)
    (local $2^-16 f64) (local $2^16 f64) (local $t f64)
-   ;; do it directly if it would be faster
+   ;; Do it directly if it would be faster
    (if (i32.lt_u (local.get $inlen) (global.get $CONVTHRESH))
        (then
         (return
@@ -534,7 +543,7 @@
    (if (i32.eq (local.get $inlen) (global.get $KERNPREC))
        (then (local.set $prec2pow (global.get $CONVSZ)))
      (else (local.set $prec2pow (call $conv-size (local.get $prec)))))
-   ;; initialize buffers to input
+   ;; Initialise buffers to input
    (local.set $i (i32.const 0))
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $inlen))
@@ -563,7 +572,7 @@
                                (i32.const 0xFFFF))))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
-   (local.set $i (i32.shl (local.get $i) (i32.const 1)))
+   (local.set $i (i32.mul (local.get $i) (i32.const 2)))
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $prec2pow))
          (then
@@ -584,21 +593,14 @@
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $tmp2))
          (then
-          (call $f64idx (local.get $bufa) (local.get $i))
-          (local.tee $tmp1)
-          (f64.floor
-           (f64.add (f64.load (local.get $tmp1))
-                    (f64.add (local.get $carry) (f64.const 0.5))))
-          local.tee $t
-          local.get $t
-          local.get $2^-16
-          f64.mul
-          f64.floor
-          local.tee $carry
-          local.get $2^16
-          f64.mul
-          f64.sub
-          f64.store
+          (local.set $tmp1 (call $f64idx (local.get $bufa) (local.get $i)))
+          (local.set $t (f64.floor
+                         (f64.add (f64.load (local.get $tmp1))
+                                  (f64.add (local.get $carry) (f64.const 0.5)))))
+          (local.set $carry (f64.floor (f64.mul (local.get $t) (local.get $2^-16))))
+          (f64.store
+           (local.get $tmp1)
+           (f64.sub (local.get $t) (f64.mul (local.get $carry) (local.get $2^16))))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
    ;; from here on we start writing, one in MSB of previous word is carry
@@ -606,30 +608,24 @@
                                (i32.sub (local.get $i) (i32.const 1))))
                (f64.convert_i32_u (i32.shl (i32.const 1) (i32.const 15))))
        (then (local.set $carry (f64.add (local.get $carry) (f64.const 1)))))
-   (local.set $tmp2 (i32.shl (i32.add (local.get $prec) (local.get $inlen))
-                             (i32.const 1)))
+   (local.set $tmp2 (i32.mul (i32.add (local.get $prec) (local.get $inlen))
+                             (i32.const 2)))
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $tmp2))
          (then
-          (call $f64idx (local.get $bufa) (local.get $i))
-          (local.tee $tmp1)
-          (f64.floor
-           (f64.add (f64.load (local.get $tmp1))
-                    (f64.add (local.get $carry) (f64.const 0.5))))
-          local.tee $t
-          local.get $t
-          local.get $2^-16
-          f64.mul
-          f64.floor
-          local.tee $carry
-          local.get $2^16
-          f64.mul
-          f64.sub
-          f64.store
+          (local.set $tmp1 (call $f64idx (local.get $bufa) (local.get $i)))
+          (local.set $t
+                     (f64.floor
+                      (f64.add (f64.load (local.get $tmp1))
+                               (f64.add (local.get $carry) (f64.const 0.5)))))
+          (local.set $carry (f64.floor (f64.mul (local.get $t) (local.get $2^-16))))
+          (f64.store
+           (local.get $tmp1)
+           (f64.sub (local.get $t) (f64.mul (local.get $carry) (local.get $2^16))))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
    (local.set $i (i32.const 0))
-   (local.set $tmp2 (i32.add (local.get $instart) (local.get $inlen)))
+   (local.set $tmp2 (i32.sub (local.get $instart) (local.get $inlen)))
    (loop $cont-i
      (if (i32.le_u (local.get $i) (local.get $tmp2))
          (then
@@ -647,29 +643,29 @@
    (loop $cont-i
      (if (i32.lt_u (local.get $i) (local.get $tmp2))
          (then
-          (call $i32idx (local.get $man*) (i32.sub (local.get $i) (local.get $tmp1)))
-          (f64.load (call $reidx (local.get $bufa) (local.get $i)))
-          i32.trunc_f64_u
-          (f64.load (call $imidx (local.get $bufa) (local.get $i)))
-          i32.trunc_f64_u
-          (i32.const 16)
-          i32.shl
-          i32.add
-          i32.store
+          (i32.store
+           (call $i32idx (local.get $man*) (i32.sub (local.get $i) (local.get $tmp1)))
+           (i32.add
+            (i32.trunc_f64_u
+             (f64.load (call $reidx (local.get $bufa) (local.get $i))))
+            (i32.shl
+             (i32.trunc_f64_u
+              (f64.load (call $imidx (local.get $bufa) (local.get $i))))
+             (i32.const 16))))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
    ;; leave the last word as result
-   (f64.load (call $reidx (local.get $bufa) (local.get $i)))
-   i32.trunc_f64_u
-   (f64.load (call $imidx (local.get $bufa) (local.get $i)))
-   i32.trunc_f64_u
-   (i32.const 16)
-   i32.shl
-   i32.add)
+   (i32.add
+    (i32.trunc_f64_u
+     (f64.load (call $reidx (local.get $bufa) (local.get $i))))
+    (i32.shl
+     (i32.trunc_f64_u
+      (f64.load (call $imidx (local.get $bufa) (local.get $i))))
+     (i32.const 16))))
 
  (func $is_multiplied_by_convolution (export "is_multiplied_by_convolution")
    (param $inlen i32) (result i32)
-   (i32.ge_u (local.get $inlen) (global.get $CONVTHRESH)))
+   (i32.ge_s (local.get $inlen) (global.get $CONVTHRESH)))
 
  ;; sub_man_bscaled: Auxilliary function to help division.
  ;; - Arguments:
@@ -693,20 +689,23 @@
      (local.set $u (local.get $instart))
      (local.set $tmp1 (i32.add (local.get $instart) (local.get $aofs)))
      (loop $cont-u
-       (if (i32.lt_u (local.get $u) (local.get $tmp1))
+       (if (i32.lt_s (local.get $u) (local.get $tmp1))
            (then
-            (i64.sub (i64.sub (i64.const 0) (i64.extend_i32_u (local.get $s)))
-                     (i64.extend_i32_u (local.get $carry)))
-            (local.set $v)
+            (local.set $v
+                       (i64.sub (i64.sub (i64.const 0) (i64.extend_i32_u (local.get $s)))
+                                (i64.extend_i32_u (local.get $carry))))
             (i32.store (call $i32idx (local.get $res*) (local.get $u))
                        (i32.wrap_i64 (local.get $v)))
-            (local.set $carry (i64.gt_u (local.get $v) (i64.const 0xffffffff)))
-            (i32.load (call $i32idx (local.get $b*) (local.get $u)))
+            (local.set $carry (i64.ne (i64.shr_u (local.get $v) (i64.const 32))
+                                      (i64.const 0)))
+            (local.set
+             $s
+             (call $combinewords
+                   (i32.load (call $i32idx (local.get $b*) (local.get $u)))
+                   (i32.load (call $i32idx (local.get $b*)
+                                   (i32.add (local.get $u) (i32.const 1))))
+                   (local.get $bscale)))
             (local.set $u (i32.add (local.get $u) (i32.const 1)))
-            (i32.load (call $i32idx (local.get $b*) (local.get $u)))
-            (local.get $bscale)
-            (call $combinewords)
-            (local.set $s )
             (br $cont-u))))
      ;; Subtract words
      (local.set $tmp1 (i32.sub (local.get $inlen) (i32.const 1)))
@@ -715,49 +714,52 @@
        (if (i32.lt_u (local.get $u) (local.get $tmp1))
            (then
             (local.set $ui (i32.add (local.get $u) (local.get $instart)))
-            (local.set $tmp2 (i32.sub (local.get $ui) (local.get $aofs)))
-            (call $i32idx (local.get $res*) (local.get $ui))
-            (i64.sub
-             (i64.sub
-              (i64.extend_i32_u (i32.load (call $i32idx (local.get $a*) (local.get $tmp2))))
-              (i64.extend_i32_u (local.get $s)))
-             (i64.extend_i32_u (local.get $carry)))
-            (local.tee $v)
-            i32.wrap_i64
-            i32.store
-            (local.set $carry (i64.gt_u (local.get $v) (i64.const 0xffffffff)))
-            (i32.load (call $i32idx (local.get $b*) (local.get $ui)))
-            (i32.load (call $i32idx (local.get $b*) (i32.add (local.get $ui)
-                                                             (i32.const 4))))
-            (local.get $bscale)
-            (call $combinewords)
-            (local.set $s)
+            (local.set $tmp2 (call $i32idx (local.get $a*)
+                                   (i32.sub (local.get $ui) (local.get $aofs))))
+            (local.set $v (i64.sub
+                           (i64.sub
+                            (i64.extend_i32_u (i32.load (local.get $tmp2)))
+                            (i64.extend_i32_u (local.get $s)))
+                           (i64.extend_i32_u (local.get $carry))))
+            (i32.store
+             (call $i32idx (local.get $res*) (local.get $ui))
+             (i32.wrap_i64 (local.get $v)))
+            (local.set $carry (i64.ne (i64.shr_u (local.get $v) (i64.const 32))
+                                      (i64.const 0)))
+            (local.set $s (call $combinewords
+                                (i32.load (call $i32idx (local.get $b*) (local.get $ui)))
+                                (i32.load (call $i32idx (local.get $b*)
+                                                (i32.add (local.get $ui) (i32.const 1))))
+                                (local.get $bscale)))
             (local.set $u (i32.add (local.get $u) (i32.const 1)))
             (br $cont-u))))
      ;; {
      (local.set $ui (i32.add (local.get $u) (local.get $instart)))
-     (local.set $tmp2 (i32.sub (local.get $ui) (local.get $aofs)))
-     (call $i32idx (local.get $res*) (local.get $ui))
-     (i64.sub
-      (i64.sub
-       (i64.extend_i32_u (i32.load (call $i32idx (local.get $a*) (local.get $tmp2))))
-       (i64.extend_i32_u (local.get $s)))
-      (i64.extend_i32_u (local.get $carry)))
-     (local.tee $v)
-     i32.wrap_i64
-     i32.store
-     (local.set $carry (i64.gt_u (local.get $v) (i64.const 0xffffffff)))
-     (i32.load (call $i32idx (local.get $b*) (local.get $ui)))
-     (i32.const 0)
-     (local.get $bscale)
-     (call $combinewords)
-     (local.set $s)
+     (local.set $tmp2 (call $i32idx (local.get $a*)
+                            (i32.sub (local.get $ui) (local.get $aofs))))
+     (local.set $v (i64.sub
+                    (i64.sub
+                     (i64.extend_i32_u (i32.load (local.get $tmp2)))
+                     (i64.extend_i32_u (local.get $s)))
+                    (i64.extend_i32_u (local.get $carry))))
+     (i32.store
+      (call $i32idx (local.get $res*) (local.get $ui))
+      (i32.wrap_i64 (local.get $v)))
+     (local.set $carry (i64.ne (i64.shr_u (local.get $v) (i64.const 32))
+                               (i64.const 0)))
+     (local.set $s (call $combinewords
+                         (i32.load (call $i32idx (local.get $b*) (local.get $ui)))
+                         (i32.const 0)
+                         (local.get $bscale)))
      ;; }
-     (i64.sub (i64.sub (i64.extend_i32_u (i32.load (local.get $amsw*)))
-                       (i64.extend_i32_u (local.get $s)))
-              (i64.extend_i32_u (local.get $carry)))
-     (local.set $v)
-     (if (result i32) (i64.gt_u (local.get $v) (i64.const 0xffffffff))
+     (local.set $v (i64.sub
+                    (i64.sub
+                     (i64.extend_i32_u (i32.load (local.get $amsw*)))
+                     (i64.extend_i32_u (local.get $s)))
+                    (i64.extend_i32_u (local.get $carry))))
+     (local.set $carry (i64.ne (i64.shr_u (local.get $v) (i64.const 32))
+                               (i64.const 0)))
+     (if (result i32) (local.get $carry)
        (then (i32.const 0))
        (else
         (i32.store (local.get $amsw*) (i32.wrap_i64 (local.get $v)))
@@ -788,7 +790,7 @@
    (local.set $ofs (i32.const 0))
    (local.set $k (i32.const 0))
    (loop $cont-k
-     (if (i32.lt_u (local.get $k) (local.get $instart))
+     (if (i32.lt_s (local.get $k) (local.get $instart))
          (then
           (i32.store (call $i32idx (local.get $man*) (local.get $k)) (i32.const 0))
           (local.set $k (i32.add (local.get $k) (i32.const 1)))
@@ -797,7 +799,7 @@
    (block $exit-sc
      (local.set $sc (i32.const 31))
      (loop $cont-sc
-       (if (i32.ge_u (local.get $sc) (i32.const 0))
+       (if (i32.ge_s (local.get $sc) (i32.const 0))
            (then
             (if (call $sub_man_bscaled (local.get $temp1*) (local.get $a*) (local.get $b*)
                       (local.get $amsw*) (local.get $sc) (local.get $inlen)
@@ -805,7 +807,7 @@
                 (then (br $exit-sc)))
             (local.set $sc (i32.sub (local.get $sc) (i32.const 1)))
             (br $cont-sc)))))
-   (if (i32.lt_u (local.get $sc) (i32.const 0))
+   (if (i32.lt_s (local.get $sc) (i32.const 0))
        (then
         (local.set $e (i32.const 0))
         (local.set $i (i32.sub (local.get $i) (i32.const 1)))
@@ -816,7 +818,7 @@
         (block $exit-sc
           (local.set $sc (i32.const 31))
           (loop $cont-sc
-            (if (i32.ge_u (local.get $sc) (i32.const 0))
+            (if (i32.ge_s (local.get $sc) (i32.const 0))
                 (then
                  (if (call $sub_man_bscaled (local.get $temp1*) (local.get $a*) (local.get $b*)
                            (local.get $amsw*) (local.get $sc) (local.get $inlen)
@@ -828,11 +830,11 @@
         ))
    (local.set $r (i32.or (local.get $r) (i32.shl (i32.const 1) (local.get $sc))))
    (loop $cont-j
-     (if (i32.ge_u (local.get $j) (local.get $instart))
+     (if (i32.ge_s (local.get $j) (local.get $instart))
          (then
           (local.set $sc (i32.sub (local.get $sc) (i32.const 1)))
           (loop $cont-sc
-            (if (i32.ge_u (local.get $sc) (i32.const 0))
+            (if (i32.ge_s (local.get $sc) (i32.const 0))
                 (then
                  (if (call $sub_man_bscaled (local.get $temp2*) (local.get $temp1*)
                            (local.get $b*) (local.get $amsw*) (local.get $sc)
@@ -843,12 +845,13 @@
                       (local.set $tmp1 (local.get $temp1*))
                       (local.set $temp1* (local.get $temp2*))
                       (local.set $temp2* (local.get $tmp1))))
+                 (local.set $sc (i32.sub (local.get $sc) (i32.const 1)))
                  (br $cont-sc))))
           (block $exit-scj
             (local.set $ofs (i32.const 0))
             (loop $cont-scj
-              (if (i32.and (i32.lt_u (local.get $sc) (i32.const 0))
-                           (i32.ge_u (local.get $j) (local.get $instart)))
+              (if (i32.and (i32.lt_s (local.get $sc) (i32.const 0))
+                           (i32.ge_s (local.get $j) (local.get $instart)))
                   (then
                    (local.set $ofs (i32.add (local.get $ofs) (i32.const 1)))
                    (local.set $sc (i32.const 32))
@@ -856,7 +859,7 @@
                    (i32.store (call $i32idx (local.get $man*) (local.get $j))
                               (local.get $r))
                    (local.set $j (i32.sub (local.get $j) (i32.const 1)))
-                   (if (i32.lt_u (local.get $j) (local.get $instart))
+                   (if (i32.lt_s (local.get $j) (local.get $instart))
                        (then (br $exit-scj)))
                    (local.set $tmp1 (i32.add
                                      (i32.sub (local.get $inlen) (local.get $ofs))
@@ -868,7 +871,7 @@
                      (local.set $r (i32.const 0))
                      (local.set $sc (i32.const 31))
                      (loop $cont-sc
-                       (if (i32.ge_u (local.get $sc) (i32.const 0))
+                       (if (i32.ge_s (local.get $sc) (i32.const 0))
                            (then
                             (if (call $sub_man_bscaled
                                       (local.get $temp2*) (local.get $temp1*)
@@ -894,21 +897,18 @@
        (then
         (local.set $j (i32.add (local.get $j) (i32.const 1)))
         (loop $cont-j
-          (if (i32.lt_u (local.get $j) (local.get $kprec))
+          (if (i32.lt_s (local.get $j) (local.get $kprec))
               (then
-               (call $i32idx (local.get $man*) (local.get $j))
-               local.tee $tmp1
-               i32.load
-               (i32.const 1)
-               i32.add
-               (local.tee $tmp2)
-               (i32.store (local.get $tmp1))
+               (local.set $tmp1 (call $i32idx (local.get $man*) (local.get $j)))
+               (local.set $tmp2 (i32.add (i32.load (local.get $tmp1)) (i32.const 1)))
+               (i32.store (local.get $tmp1) (local.get $tmp2))
                (if (i32.eqz (local.get $tmp2))
                    (then
                     (local.set $j (i32.add (local.get $j) (i32.const 1)))
                     (br $cont-j))))))
         (if (i32.eq (local.get $j) (local.get $kprec))
             (then
+             ;; carry on msw means we have 1(0)
              (local.set $e (i32.add (local.get $e) (i32.const 1)))
              (i32.store
               (call $i32idx (local.get $man*) (i32.sub (local.get $j) (i32.const 1)))
@@ -958,31 +958,30 @@
    (local.set $divisor64 (i64.extend_i32_u (local.get $divisor)))
    (if (i64.lt_u (local.get $v) (local.get $divisor64))
        (then
-        (i64.shl (local.get $v) (i64.const 32))
         (local.set $i (i32.sub (local.get $i) (i32.const 1)))
-        (i32.load (call $i32idx (local.get $src*) (local.get $i)))
-        i64.extend_i32_u
-        i64.add
-        (local.set $v)
+        (local.set
+         $v (i64.add
+             (i64.extend_i32_u (i32.load (call $i32idx (local.get $src*) (local.get $i))))
+             (i64.shl (local.get $v) (i64.const 32))))
         (local.set $e (i32.const -1))))
    (loop $cont-i
-     (if (i32.gt_u (local.get $i) (i32.const 0))
+     (if (i32.gt_s (local.get $i) (i32.const 0))
          (then
           (i32.store (call $i32idx (local.get $man*) (local.get $j))
                      (i32.wrap_i64 (i64.div_u (local.get $v) (local.get $divisor64))))
           (local.set $j (i32.sub (local.get $j) (i32.const 1)))
-          (i64.add
-           (i64.shl (i64.rem_u (local.get $v) (local.get $divisor64)) (i64.const 32))
-           (i64.extend_i32_u (i32.load (call $i32idx (local.get $src*) (local.get $i)))))
-          (local.set $v)
           (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+          (local.set
+           $v
+           (i64.add
+            (i64.shl (i64.rem_u (local.get $v) (local.get $divisor64)) (i64.const 32))
+            (i64.extend_i32_u (i32.load (call $i32idx (local.get $src*) (local.get $i))))))
           (br $cont-i))))
    (i32.store (call $i32idx (local.get $man*) (local.get $j))
               (i32.wrap_i64 (i64.div_u (local.get $v) (local.get $divisor64))))
    (local.set $j (i32.sub (local.get $j) (i32.const 1)))
-   (if (i32.eqz (local.get $j))
+   (if (i32.eqz (local.get $j)) ;; this would happen if msw in src was < divisor
        (then
-        ;; this would happen if msw in src was < divisor
         (local.set $v (i64.shl (i64.rem_u (local.get $v) (local.get $divisor64))
                                (i64.const 32)))
         (i32.store (call $i32idx (local.get $man*) (local.get $j))
@@ -990,19 +989,15 @@
         (local.set $j (i32.sub (local.get $j) (i32.const 1)))))
    ;; round the result; j is -1
    (if (i64.gt_u (i64.rem_u (local.get $v) (local.get $divisor64))
-                 (i64.shr_u (local.get $divisor64) (i64.const 1)))
+                 (i64.div_u (local.get $divisor64) (i64.const 2)))
        (then
         (local.set $j (i32.add (local.get $j) (i32.const 1)))
         (loop $cont-j
-          (if (i32.lt_u (local.get $j) (local.get $kprec))
+          (if (i32.lt_s (local.get $j) (local.get $kprec))
               (then
-               (call $i32idx (local.get $man*) (local.get $j))
-               local.tee $tmp1
-               i32.load
-               (i32.const 1)
-               i32.add
-               (local.tee $tmp2)
-               (i32.store (local.get $tmp1))
+               (local.set $tmp1 (call $i32idx (local.get $man*) (local.get $j)))
+               (local.set $tmp2 (i32.add (i32.load (local.get $tmp1)) (i32.const 1)))
+               (i32.store (local.get $tmp1) (local.get $tmp2))
                (if (i32.eqz (local.get $tmp2))
                    (then
                     (local.set $j (i32.add (local.get $j) (i32.const 1)))
@@ -1023,22 +1018,17 @@
    (local.set $v (i32.const 0))
    (local.set $i (i32.const 0))
    (loop $cont-i
-     (if (i32.lt_u (local.get $i) (local.get $kprec))
+     (if (i32.lt_s (local.get $i) (local.get $kprec))
          (then
           (local.set $tmp1 (i32.load (call $i32idx (local.get $src*) (local.get $i))))
-          (i32.or (local.get $v) (i32.shl (local.get $tmp1) (local.get $scale)))
-          (i32.store (call $i32idx (local.get $man*) (local.get $i)))
+          (i32.store
+           (call $i32idx (local.get $man*) (local.get $i))
+           (i32.or (i32.shl (local.get $tmp1) (local.get $scale)) (local.get $v)))
           (local.set $v (i32.shr_u (local.get $tmp1)
                                    (i32.sub (i32.const 32) (local.get $scale))))
           (local.set $i (i32.add (local.get $i) (i32.const 1)))
           (br $cont-i))))
    (local.get $v))
-
-
- ;; TODO: Audit kernel methods:
- ;;       - Check all stores (argument order! sub_man_bscaled etc. for example)
- ;;       - signed vs unsigned variables and operations and comparisons
- ;;       - Loops and branching
 
 
  ;; ============================================================================
@@ -1528,7 +1518,7 @@
      (select
       (local.get $a)
       (local.get $b)
-      (i32.ge_u (local.get $a) (local.get $b))))
+      (i32.ge_s (local.get $a) (local.get $b))))
 
  (func $reverse_bits
      (param $z i32) (param $bits i32) (result i32)
