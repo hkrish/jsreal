@@ -1,7 +1,7 @@
 // -*- mode: js2 -*-
 
 const C32 = 0x100000000;
-const I32_MAX = 0xffffffff;
+const I32_MAX = 0x7fffffff;
 
 // C' ldexp function
 $defmacro(function $_ldexp(a, b) { (a) * (2 ** (b)) }, 'expr');
