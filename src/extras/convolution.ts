@@ -1,5 +1,5 @@
-//! import './macros/debug.jsmacro';
-//! import './macros/jsreal.jsmacro';
+//! import '../macros/debug.jsmacro';
+//! import '../macros/jsreal.jsmacro';
 
 
 // real convolution object

@@ -1,5 +1,5 @@
 import { Convolution } from "./convolution";
-import { IReal } from "./ireal";
+import { IReal } from "./base-real";
 
 //! import './macros/debug.jsmacro';
 //! import './macros/jsreal.jsmacro';
