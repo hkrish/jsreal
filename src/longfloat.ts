@@ -26,7 +26,7 @@ export type Sign = -1 | 1;
 
 
 export class LongFloat {
-    // current working precision
+    // Current working precision
     private static _working_precision = 3;
     private static kernel: IKernel;
     private static kfns: WKernel;
@@ -34,11 +34,11 @@ export class LongFloat {
     private sign: Sign;
     // !== LFSpecial.Normal only in special values
     private special: LFSpecial;
-    // needed precision. this is the point at which multiplication and division will stop
+    // Needed precision. this is the point at which multiplication and division will stop
     private _precision: number;
-    // exponent, power of 2**32
+    // Exponent, power of 2**32
     private exp: Int32Array;
-    // mantissa
+    // Mantissa
     private mts: Mantissa;
     private _buffer: ArrayBuffer;
 
@@ -126,9 +126,14 @@ export class LongFloat {
         return this.special === LFSpecial.Nan;
     }
 
-    kind (): string {
-        return LFSpecial[this.special].toLowerCase();
+    get kind (): LFSpecial {
+        return this.special;
     }
+
+    get exponent (): number {
+        return this.exp[0];
+    }
+
 
     // ----- Arithmetic -----
 
@@ -313,13 +318,13 @@ export class LongFloat {
         return this.clone().sub_self(rhs);
     }
 
-    // binary scale: lf << howmuch
+    // Binary scale: lf << howmuch
     shl_self (howmuch: number) {
-        // has no effect on special values
+        // Has no effect on special values
         if (howmuch === 0 || this.special !== LFSpecial.Normal) {
             return this;
         }
-        // split to exponent offset and BScale mantissa amount
+        // Split to exponent offset and BScale mantissa amount
         let exp = (((howmuch >= 0) ? howmuch : (howmuch - 31)) / 32) | 0;
         howmuch -= exp * 32;
         if (howmuch === 0) {
@@ -465,7 +470,7 @@ export class LongFloat {
         return this.clone().sq_self();
     }
 
-    // use pow(a, 2*p) == pow(a*a, p)
+    // Use pow(a, 2*p) == pow(a*a, p)
     pow_self (pwr: number): this {
         if (!Number.isInteger(pwr) || (pwr | 0) !== pwr) {
             throw new ExnType('pow_self expects a 32bit integer', 'given', pwr);
@@ -491,7 +496,7 @@ export class LongFloat {
     }
 
 
-    // computes multiply-accumulate operation : this.add_self(a.mul(b))
+    // Computes multiply-accumulate operation : this.add_self(a.mul(b))
     // TODO: This can be done faster
     fma_self (a: LongFloat, b: LongFloat): this;
     fma_self (a: LongFloat, b: number): this;
@@ -499,8 +504,6 @@ export class LongFloat {
         return this.add_self(a.mul(b));
     }
 
-    // computes multiply-accumulate operation : this.add(a.mul(b))
-    // TODO: This can be done faster
     fma (a: LongFloat, b: LongFloat): LongFloat;
     fma (a: LongFloat, b: number): LongFloat;
     fma (a: LongFloat, b: LongFloat | number): LongFloat {
@@ -642,10 +645,10 @@ export class LongFloat {
         }
     }
 
-    // rounding error functions. needed to minimize the dependancies of Estimate to the
+    // Rounding error functions. needed to minimize the dependancies of Estimate to the
     // actual LongFloat implementation.
     //
-    // return the index of the first possibly incorrect bit (provided the inputs were
+    // Return the index of the first possibly incorrect bit (provided the inputs were
     // correct)
 
     rounding_error_add (): number {
@@ -662,25 +665,34 @@ export class LongFloat {
     }
 
 
-    // ----- Comparison -----
+    // ----- Comparisons -----
 
-    // >=: checks if difference is negative
+    // >= operator: checks if difference is negative
     ge (rhs: LongFloat): boolean {
         return !(this.sub(rhs)).is_negative();
     }
 
+    // == operator
     eq (rhs: LongFloat): boolean {
         return (this.sub(rhs)).special === LFSpecial.Zero;
     }
 
+    // != operator
     ne (rhs: LongFloat): boolean { return !this.eq(rhs); }
+
+    // > operator
     gt (rhs: LongFloat): boolean { return !rhs.ge(this); }
+
+    // < operator
     lt (rhs: LongFloat): boolean { return !this.ge(rhs); }
+
+    // <= operator
     le (rhs: LongFloat): boolean { return rhs.ge(this); }
+
 
     // ----- Rounding and Normalising -----
 
-    // truncates the mantissa at the point where exponent is zero
+    // Truncates the mantissa at the point where exponent is zero
     round_toward_zero_self (): this {
         const wprec = LongFloat._working_precision;
         let exp = this.exp[0];
@@ -701,7 +713,7 @@ export class LongFloat {
         return this.clone().round_toward_zero_self();
     }
 
-    // round to nearest integer
+    // Round to nearest integer
     round (): LongFloat {
         const wprec = LongFloat._working_precision;
         let exp = this.exp[0];
@@ -741,7 +753,7 @@ export class LongFloat {
         return new LongFloat(lfexp, lfman, this.sign, LFSpecial.Normal, this.precision);
     }
 
-    // normalization: returns an exponent that would set the mantissa in the range:
+    // Normalization: returns an exponent that would set the mantissa in the range:
     // - [0.5; 1)
     normalize (): number {
         if (this.special !== LFSpecial.Normal) {
@@ -758,9 +770,9 @@ export class LongFloat {
     }
 
 
-    // ----- Conversions to... -----
+    // ----- Conversions -----
 
-    // return the nearest double value
+    // Return the nearest double value
     as_double (): number {
         let v = 0;
         switch (this.special) {
@@ -788,8 +800,8 @@ export class LongFloat {
         return this.sign * v;
     }
 
-    // mantissa conversion. Don't care about any other attribute
-    only_mantissa (): LongFloat {
+    // Mantissa conversion. Don't care about any other attribute
+    mantissa (): LongFloat {
         const buf = this._buffer.slice(0, this._buffer.byteLength);
         const iv = new Int32Array(buf, 0, 1);
         const uv = new Uint32Array(buf, 4);
@@ -797,7 +809,7 @@ export class LongFloat {
         return new LongFloat(iv, uv, 1, this.special, this._precision);
     }
 
-    only_signed_mantissa (): LongFloat {
+    signed_mantissa (): LongFloat {
         const buf = this._buffer.slice(0, this._buffer.byteLength);
         const iv = new Int32Array(buf, 0, 1);
         const uv = new Uint32Array(buf, 4);
@@ -805,8 +817,8 @@ export class LongFloat {
         return new LongFloat(iv, uv, this.sign, this.special, this._precision);
     }
 
-    // mantissa conversion. Don't care about any other attribute
-    only_mantissa_as_double (): number {
+    // Mantissa conversion. Don't care about any other attribute
+    mantissa_as_double (): number {
         let wprec = LongFloat._working_precision;
         let d = $_ldexp(this.mts[wprec - 1], -32);
         d += $_ldexp(this.mts[wprec - 2], -64);
@@ -814,7 +826,7 @@ export class LongFloat {
         return d;
     }
 
-    // mantissa_as_decimal: convert the fraction to a decimal string.
+    // mantissa_as_decimal: Convert the fraction to a decimal string.
     // - Returns a pair [ string, carry ]
     //   - Does not add the leading '.' to the first element
     //   - Second element is true if the rounding resulted in carry, i.e. the mantissa
@@ -847,7 +859,7 @@ export class LongFloat {
         return [String.fromCharCode(...digits), (i === -1)];
     }
 
-    // output
+    // Output
     as_decimal (n = 20): string {
         $_dassert(n >= 10,
             'as_decimal the number digits should at least accommodate the exponent.');
@@ -872,14 +884,14 @@ export class LongFloat {
                 strs.push('Zero');
                 break;
             default:
-                // calculate exponent: the least power of 10 that is greater than or equal
+                // Calculate exponent: the least power of 10 that is greater than or equal
                 // to the value.
                 let pwr = Math.trunc(this.normalize() * (Math.LOG10E / Math.LOG2E));
-                // divide the value by the exponent to form decimal mantissa
+                // Divide the value by the exponent to form decimal mantissa
                 const one = LongFloat.from_double(1);
                 const ten = LongFloat.from_double(10);
                 a.div_self(ten.pow(pwr));
-                // double arithmetic can be wrong...
+                // double-arithmetic can be wrong...
                 if (a.gt(one)) {
                     a.div_self(ten);
                     pwr++;
@@ -892,7 +904,7 @@ export class LongFloat {
                 }
                 const expstr = `${pwr >= 0 ? '+' : ''}${pwr}`;
                 const explen = expstr.length;
-                // when the value is power of ten, we can get two possible representations
+                // When the value is power of ten, we can get two possible representations
                 // of the mantissa: 0.(9) and 1.(0). This behavior is not an error as it
                 // is consistent with the theory. The function used to convert the
                 // mantissa will not display 1.(0) correctly. Thus we must handle the case
@@ -912,7 +924,7 @@ export class LongFloat {
 
     // ----- Static constructors -----
 
-    // exact conversion; set to man * 2**(32*exp)
+    // Exact conversion; set to man * 2**(32*exp)
     static from_32bit (mts: number, exp: number): LongFloat {
         let buf = LongFloat.alloc();
         const iv = new Int32Array(buf, 0, 1);
@@ -937,7 +949,7 @@ export class LongFloat {
         return new LongFloat(iv, uv, sign, special, LongFloat._working_precision);
     }
 
-    // exact conversion
+    // Exact conversion
     static from_double (d: number): LongFloat {
         let buf: ArrayBuffer = LongFloat.alloc();
         let iv = new Int32Array(buf, 0, 1);
@@ -981,7 +993,7 @@ export class LongFloat {
         return new LongFloat(iv, uv, sign, special, prec);
     }
 
-    // initialize from string; set to closest representable value
+    // Initialise from string; set to closest representable value
     static from_string (s: string): LongFloat {
         s = s.trim();
         let val = [...s].map(c => c.charCodeAt(0));
@@ -1006,7 +1018,7 @@ export class LongFloat {
             t = LongFloat.from_32bit(val[i] - czero, 0).fma(t, 10);
             ++i;
         }
-        // on fractions we proceed as usual, only remember how many fractional digits
+        // On fractions we proceed as usual, only remember how many fractional digits
         // we've processed
         let expd = 0;
         if (val[i] === cperiod) {
@@ -1017,7 +1029,7 @@ export class LongFloat {
                 ++i;
             }
         }
-        // add the exponent to the one we've gathered until now
+        // Add the exponent to the one we've gathered until now
         if (val[i] === cee || val[i] === cEE) {
             ++i;
             let eneg = false;
@@ -1032,7 +1044,7 @@ export class LongFloat {
             }
             expd += eneg ? -expt : expt;
         }
-        // multiply by the power of ten that is the exponent
+        // Multiply by the power of ten that is the exponent
         if (expd) {
             t.mul_self(LongFloat.from_double(10).pow($_i32saturated(expd)));
         }
