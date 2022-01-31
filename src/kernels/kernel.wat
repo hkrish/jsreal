@@ -1443,7 +1443,7 @@
 
  ;; This does not handle Infinity. For our purposes, that case will be handled separately
  (func $frexp (export "frexp")
-   (param $x f64) (param $e i32) (result f64)
+   (param $x f64) (param $e* i32) (result f64)
    (local $i i64) (local $ee i32)
    (i64.reinterpret_f64 (local.get $x))
    (local.tee $i)
@@ -1457,14 +1457,14 @@
         (if (f64.ne (local.get $x) (f64.const 0))
             (then
              (local.set $x (call $frexp (f64.mul (local.get $x) (f64.const 0x1p64))
-                                 (local.get $e)))
-             (i32.store (local.get $e) (i32.sub (i32.load (local.get $e))
-                                                (i32.const 64))))
+                                 (local.get $e*)))
+             (i32.store (local.get $e*) (i32.sub (i32.load (local.get $e*))
+                                                 (i32.const 64))))
           (else
-           (i32.store (local.get $e) (i32.const 0))))
+           (i32.store (local.get $e*) (i32.const 0))))
         (local.get $x))
      (else
-      (i32.store (local.get $e) (i32.sub (local.get $ee) (i32.const 0x3fe)))
+      (i32.store (local.get $e*) (i32.sub (local.get $ee) (i32.const 0x3fe)))
       (f64.reinterpret_i64 (i64.or (i64.and (local.get $i)
                                             (i64.const 0x800fffffffffffff))
                                    (i64.const 0x3fe0000000000000))))))
@@ -1472,6 +1472,46 @@
  (func $trunc32 (export "trunc32")
    (param $x f64) (result i32)
    (i32.wrap_i64 (i64.trunc_f64_s (local.get $x))))
+
+
+ ;; ============================================================================
+ ;; ----- ErrorEstimate Helpers -----
+ ;; ============================================================================
+
+ (func $ee_mul (export "ee_mul")
+   (param $mts i32) (param $mtsrhs i32) (param $e i32) (param $mts* i32) (result i32)
+   (local $m i64)
+   ;; Multiply. the result will at least have 1 in 62nd position at most 1 in 63rd
+   (local.set $m (i64.mul (i64.extend_i32_u (local.get $mts))
+                          (i64.extend_i32_u (local.get $mtsrhs))))
+   ;; Round up if necessary
+   (if (i32.wrap_i64 (i64.and (i64.shl (local.get $m) (i64.const 1))
+                              (i64.const 0xffffffff)))
+       (then
+        (local.set $m (i64.add (i64.shr_u (local.get $m) (i64.const 31)) (i64.const 1))))
+     (else
+      (local.set $m (i64.shr_u (local.get $m) (i64.const 31)))))
+   ;; Make room for the 63rd bit if it is not 0
+   (if (i64.ne (i64.shr_u (local.get $m) (i64.const 31)) (i64.const 0))
+       (then
+        (if (i64.ne (i64.and (local.get $m) (i64.const 1)) (i64.const 0))
+            (then
+             (local.set $m (i64.add (local.get $m) (i64.const 1)))))
+        (local.set $m (i64.shr_u (local.get $m) (i64.const 1)))
+        (local.set $e (i32.add (local.get $e) (i32.const 1)))))
+   (i32.store (local.get $mts*) (i32.wrap_i64 (local.get $m)))
+   (local.get $e))
+
+
+ (func $ee_recip (export "ee_recip")
+   (param $mts i32) (param $mts* i32)
+   (i32.store (local.get $mts*)
+              (i32.wrap_i64
+               (i64.div_u
+                (i64.sub (i64.add (i64.shl (i64.const 1) (i64.const 62))
+                                  (i64.extend_i32_u (local.get $mts)))
+                         (i64.const 1))
+                (i64.extend_i32_u (local.get $mts))))))
 
 
  ;; ============================================================================

@@ -33,12 +33,6 @@ $defmacro(function $_lsh(a, n) { (a * (2 ** n)) }, 'expr');
 
 $defmacro(function $_rsh(a, n) { ((a / (2 ** n))|0) }, 'expr');
 
-
-$defmacro(function $_combinewords(a, b, bscale) {
-    ((bscale === 0) ? b : ($_rsh(a, 32 - bscale) + $_lsh(b, bscale)))
-}, 'expr');
-
-
 $defmacro(function $_i32saturated(a) {
-    ((a < I32_MAX ? (a > -I32_MAX ? a : -I32_MAX + 1) : I32_MAX - 1) | 0)
+    ((a < I32_MAX ? (a > -I32_MAX ? a : -I32_MAX + 1) : I32_MAX - 1) % C32)
 }, 'expr');

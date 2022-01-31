@@ -46,4 +46,8 @@ interface WKernel {
     frexp (x: number, expidx: number): number;
 
     trunc32 (x: number): number;
+
+    ee_mul (mts: number, mtsrhs: number, e: number, mtsidx: number): number;
+
+    ee_recip (mts: number, mtsidx: number): void;
 }

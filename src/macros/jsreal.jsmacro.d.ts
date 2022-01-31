@@ -10,5 +10,4 @@ declare function $_lo32(v64: any): any;
 declare function $_hi32(v64: any): any;
 declare function $_lsh(a: any, n: any): any;
 declare function $_rsh(a: any, n: any): any;
-declare function $_combinewords(a: any, b: any, bscale: any): any;
 declare function $_i32saturated(a: any): any;
