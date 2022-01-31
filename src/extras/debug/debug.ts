@@ -2,10 +2,32 @@ import { current_kernel } from "../../kernels/kernel";
 import { LongFloat } from "../../longfloat";
 
 
+function curry (f: (...a: any[]) => any, as: any[] = []): (...a: any[]) => any {
+    return (...b: any[]) => {
+        let args = as.concat(b);
+        return (args.length >= f.length) ? f(...args) : curry(f, args);
+    };
+}
 
-const spaces = (n: number) => new Array(Math.max(0, n)).fill(' ').join('');
+function tostr (a: any): string {
+    if (typeof a === 'string') {
+        return a;
+    } else if (typeof a === 'number') {
+        return a.toString();
+    } else if (Array.isArray(a)) {
+        return `[${a.toString()}]`;
+    } else if (typeof a.toString === 'function') {
+        return a.toString();
+    } else {
+        return JSON.stringify(a, null, 2);
+    }
+}
 
-const lines = (s: any) => s.split(/\r?\n/);
+const repeat = curry((c: any, n: number) => new Array(Math.max(0, n)).fill(c).join(''));
+
+const spaces: (n: number) => string = repeat(' ');
+
+const lines = (s: any) => tostr(s).split(/\r?\n/);
 
 const indent = (w: number, s: string) => lines(s).map(
     (l: string) => spaces(w) + l).join('\n');
@@ -18,16 +40,44 @@ const indent_next = (w: number, s: string) => {
 
 const prwid = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
 
-const alignl = (w: number, s: string) =>
-    lines(s).map((l: string) => l + spaces(w - prwid(l))).join('\n');
+type AlignF = (w: number, s: string) => string;
 
-const alignr = (w: number, s: string) =>
-    lines(s).map((l: string) => spaces(w - prwid(l)) + l).join('\n');
+const alignl_p = curry((pad: string, w: number, s: string) =>
+    lines(s).map((l: string) => l + repeat(pad, w - prwid(l))).join('\n'));
+
+const alignl: AlignF = alignl_p(' ');
+
+const alignr_p = curry((pad: string, w: number, s: string) =>
+    lines(s).map((l: string) => repeat(pad, w - prwid(l)) + l).join('\n'));
+
+const alignr: AlignF = alignr_p(' ');
+
+const align0: AlignF = alignr_p('0');
 
 const alignc = (w: number, s: string) => lines(s).map((l: string) => {
     let w1 = Math.floor((w - prwid(l)) / 2);
     return spaces(w1) + l + spaces(w - w1);
 }).join('\n');
+
+const groups = curry((n: number, arr: any[]): any[][] => {
+    let gs: any[][] = [];
+    let g: any[] = [];
+    for (let i = 0; i < arr.length; ++i) {
+        if (i > 0 && i % n === 0) {
+            gs.push(g);
+            g = [arr[i]];
+        } else {
+            g.push(arr[i]);
+        }
+    }
+    if (g.length > 0) {
+        gs.push(g);
+    }
+    return gs;
+});
+
+const octets = groups(8);
+const hexes = groups(2);
 
 
 function getbase (): number {
@@ -103,3 +153,33 @@ export function printargs (...args: any[]) {
         console.log(`${offset}:[ ${ln.join(', ')} ]`);
     }
 }
+
+
+export const print = curry((base: number, n: number) => {
+    let ng = 3;
+    let w = 10;
+    switch (base) {
+        case 2: ng = 4; w = 32; break;
+        case 8: ng = 3; w = 16; break;
+        case 10: ng = 3; w = 10; break;
+        case 16: ng = 4; w = 8; break;
+    }
+    let sign = n < 0 ? '-' : '';
+    let str = Math.abs(n).toString(base);
+    let narr = str.length;
+    while (w < narr) {
+        w *= 2;
+    }
+    if (w - narr > 0) {
+        str = repeat('0', w - narr) + str;
+    }
+    let arr = [...str];
+    return sign + (groups(ng, arr.reverse())
+        .reverse()
+        .map((g: any[]) => g.reverse().join(''))
+        .join('_'));
+});
+
+export const pr = print(10);
+export const prbin = print(2);
+export const prhex = print(16);
