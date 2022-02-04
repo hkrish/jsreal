@@ -6,6 +6,7 @@ declare global {
     type Mantissa = Uint32Array;
 }
 
+export const MINIMUM_EXPONENT = -(1 << 28);
 
 // direct multiplication will be used for precisions below this threshold and convolution
 // for larger precision.
@@ -23,13 +24,15 @@ export const EVALUATION_DEPTH = 500;
 // -----------------------------------------------------------------------------
 
 export class Exn extends Error {
+    name = 'jsreal::Exception';
+
     constructor(name: string, message: string, ...args: any[]) {
         message = `\n${indent(4, message)}\n`;
         if (args.length > 0) {
             message = `${message}${Exn.arguments_to_string(args)}`;
         }
         super(message);
-        this.name = name;
+        this.name = name || this.name;
     }
 
     private static arguments_to_string (args: any[]) {
@@ -59,41 +62,146 @@ export class ExnNotImplemented extends Exn {
         if (rec) {
             recs = `\n    Use "${rec}" instead.`
         }
-        super('NotImplementedException',
+        super('jsreal::NotImplementedException',
             `method "${name}" is not implemented.${recs}`);
     }
 }
 
 export class ExnType extends Exn {
     constructor(message: string, ...args: any[]) {
-        super('TypeError', message, ...args);
+        super('jsreal::TypeError', message, ...args);
+    }
+}
+
+// TODO: The following exception types can have a standard arg labels?
+
+export class ExnPrecision extends Exn {
+    constructor(message: any, giv?: any) {
+        if (giv == null) {
+            if (typeof message === 'string') {
+                super('jsreal::PrecisionException', message);
+            } else {
+                super('jsreal::PrecisionException', '', 'given', message);
+            }
+        } else {
+            super('jsreal::PrecisionException', message, 'given', giv);
+        }
+    }
+}
+
+export class ExnDomain extends Exn {
+    constructor(message: any, giv?: any, ...args: any[]) {
+        if (giv == null) {
+            if (typeof message === 'string') {
+                super('jsreal::DomainException', message);
+            } else {
+                super('jsreal::DomainException', '', 'given', message);
+            }
+        } else {
+            super('jsreal::DomainException', message, 'given', giv, ...args);
+        }
     }
 }
 
 
 // -----------------------------------------------------------------------------
-// ----- Formatting -----
+// ----- Printing & Formatting -----
 // -----------------------------------------------------------------------------
 
-function tostr (a: any): string {
-    if (typeof a === 'string') {
-        return a;
-    } else if (typeof a === 'number') {
-        return a.toString();
-    } else if (Array.isArray(a)) {
-        return `[${a.toString()}]`;
-    } else if (typeof a.toString === 'function') {
-        return a.toString();
-    } else {
-        return JSON.stringify(a, null, 2);
+
+export class PrinterO {
+    private _base = 10;
+    private _string: string;
+    private _print_fn: string;
+
+    constructor(opts?: any) {
+        opts = opts || {};
+        this._base = opts.base || 10;
+        this._string = opts.string || '';
+        this._print_fn = opts.print_fn || 'as_string';
+    }
+
+    get args (): any {
+        return {
+            base: this._base,
+            string: this._string,
+            print_fn: this._print_fn,
+        };
+    }
+
+    make (o: any = {}): PrinterO {
+        return new PrinterO(Object.assign(this.args, o));
+    }
+
+    get_base (): number {
+        return this._base;
+    }
+
+    set_base (val: number) {
+        this._base = val;;
+    }
+
+    base (val: number): PrinterO {
+        return this.make({ base: val });
+    }
+
+    print_fn (val: string): PrinterO {
+        return this.make({ print_fn: val });
+    }
+
+    newline (): PrinterO {
+        return this.make({ string: this._string + '\n' });
+    }
+
+    print (a: any): PrinterO {
+        let str = this._string;
+        if (typeof a === 'string') {
+            str += a;
+        } else if (typeof a === 'number' || typeof a === 'bigint') {
+            str += a.toString(this._base);
+        } else if (Array.isArray(a)) {
+            str += '[';
+            let pr = this.make({ string: '' });
+            for (let i = 0, na = a.length - 1; i < na; ++i) {
+                str += pr.print(a[i]) + ', ';
+            }
+            if (a.length > 0) {
+                str += pr.print(a[a.length - 1]);
+            }
+            str += ']';
+        } else if (typeof a[this._print_fn] === 'function') {
+            str += a[this._print_fn](this);
+        } else if (typeof a.toString === 'function') {
+            str += a.toString();
+        } else {
+            str += JSON.stringify(a, null, 2);
+        }
+        return this.make({ string: str });
+    }
+
+    get string (): string {
+        return this.toString();
+    }
+
+    set_string (s: string) {
+        this._string = s || '';
+    }
+
+    toString (): string {
+        return this._string;
+    }
+
+    to_string (a: any): string {
+        return this.print(a).toString();
     }
 }
 
-window.tostr = tostr;
+export const Printer = new PrinterO();
+
 
 const spaces = (n: number) => new Array(Math.max(0, n)).fill(' ').join('');
 
-const lines = (s: any) => tostr(s).split(/\r?\n/);
+const lines = (s: any) => Printer.to_string(s).split(/\r?\n/);
 
 const indent = (w: number, s: string) => lines(s).map(
     (l: string) => spaces(w) + l).join('\n');
