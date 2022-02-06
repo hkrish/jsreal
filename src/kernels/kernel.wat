@@ -1492,7 +1492,7 @@
      (else
       (local.set $m (i64.shr_u (local.get $m) (i64.const 31)))))
    ;; Make room for the 63rd bit if it is not 0
-   (if (i64.ne (i64.shr_u (local.get $m) (i64.const 31)) (i64.const 0))
+   (if (i64.ne (i64.shr_u (local.get $m) (i64.const 32)) (i64.const 0))
        (then
         (if (i64.ne (i64.and (local.get $m) (i64.const 1)) (i64.const 0))
             (then
