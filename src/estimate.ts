@@ -1,5 +1,6 @@
 import { ExnDomain, ExnPrecision, MINIMUM_EXPONENT } from "./defs";
 import { ErrorEstimate, RoundingMode } from "./error-estimate";
+import { EstimateIvl } from "./estimate-ivl";
 import { LFSpecial, LongFloat } from "./longfloat";
 
 // Import some macros
@@ -17,7 +18,6 @@ const MINUS_INF = -0x7FFFFFFF;
 
 
 // Constants
-let E0: Estimate;
 let E0_25: Estimate;
 let E_0_25: Estimate;
 let E0_5: Estimate;
@@ -35,7 +35,7 @@ let ASIN_C1: Estimate;
 let ASIN_C1m: Estimate;
 
 
-export class Estimate {
+export class Estimate implements EstimateIvl<Estimate> {
     private _value: LongFloat;
     // Error, |m_Value - real| < m_Error
     private _error: ErrorEstimate;
@@ -51,7 +51,6 @@ export class Estimate {
     }
 
     static initialize () {
-        E0 = <Estimate>Object.freeze(Estimate.from_double(0.0));
         E0_25 = <Estimate>Object.freeze(Estimate.from_double(0.25));
         E_0_25 = <Estimate>Object.freeze(Estimate.from_double(-0.25));
         E0_5 = <Estimate>Object.freeze(Estimate.from_double(0.5));
@@ -202,56 +201,70 @@ export class Estimate {
         return this;
     }
 
-    mul (rhs: Estimate | number): Estimate {
-        if (rhs instanceof Estimate) {
-            let r = this._value.mul(rhs._value);
-            let e = this._error.mul(rhs._error)
-                .add(this._error.mul(ErrorEstimate.from_longfloat(rhs._value)))
-                .add(rhs._error.mul(ErrorEstimate.from_longfloat(this._value)));
-            return new Estimate(r, e.add(ErrorEstimate.rounding_error(r, r.rounding_error_mul())));
-        } else {
-            rhs = rhs | 0;
-            let r = this._value.mul(rhs);
-            return new Estimate(r, this._error.mul(ErrorEstimate.from_double(rhs))
-                .add(ErrorEstimate.rounding_error(r, r.rounding_error_add())));
-        }
+    mul (rhs: Estimate): Estimate {
+        let r = this._value.mul(rhs._value);
+        let e = this._error.mul(rhs._error)
+            .add(this._error.mul(ErrorEstimate.from_longfloat(rhs._value)))
+            .add(rhs._error.mul(ErrorEstimate.from_longfloat(this._value)));
+        return new Estimate(r, e.add(ErrorEstimate.rounding_error(r, r.rounding_error_mul())));
     }
 
-    mul_self (rhs: Estimate | number): this {
+    mul_self (rhs: Estimate): this {
         let m = this.mul(rhs);
         this._value = m._value;
         this._error = m._error;
         return this;
     }
 
-    div (rhs: Estimate | number): Estimate {
-        if (rhs instanceof Estimate) {
-            if (!rhs.is_non_zero()) {
-                throw new ExnPrecision(rhs);
-            }
-            // This also assures e - rhs.m_Error > 0
-            let r = this._value.div(rhs._value);
-            let e = ErrorEstimate.from_longfloat(rhs._value, RoundingMode.Down);
-            let n = ErrorEstimate.from_longfloat(this._value).mul(rhs._error)
-                .add(ErrorEstimate.from_longfloat(rhs._value, RoundingMode.Up)
-                    .mul(this._error));
-            n = n.div(e.sub(rhs._error)).div(e)
-                .add(ErrorEstimate.rounding_error(r, r.rounding_error_div()));
-            return new Estimate(r, n);
-            // Multiplication in denominator would have the wrong rounding mode
-        } else {
-            rhs = rhs | 0;
-            if (rhs === 0) {
-                throw new ExnPrecision(rhs);
-            }
-            let r = this._value.div(rhs);
-            return new Estimate(r, this._error.div(ErrorEstimate.from_double(rhs))
-                .add(ErrorEstimate.rounding_error(r, r.rounding_error_add())));
-        }
+    mul_fast (rhs: number): Estimate {
+        rhs = rhs | 0;
+        let r = this._value.mul(rhs);
+        return new Estimate(r, this._error.mul(ErrorEstimate.from_double(rhs))
+            .add(ErrorEstimate.rounding_error(r, r.rounding_error_add())));
     }
 
-    div_self (rhs: Estimate | number): this {
+    mul_fast_self (rhs: number): this {
+        let m = this.mul_fast(rhs);
+        this._value = m._value;
+        this._error = m._error;
+        return this;
+    }
+
+    div (rhs: Estimate): Estimate {
+        if (!rhs.is_non_zero()) {
+            throw new ExnPrecision(rhs);
+        }
+        // This also assures e - rhs.m_Error > 0
+        let r = this._value.div(rhs._value);
+        let e = ErrorEstimate.from_longfloat(rhs._value, RoundingMode.Down);
+        let n = ErrorEstimate.from_longfloat(this._value).mul(rhs._error)
+            .add(ErrorEstimate.from_longfloat(rhs._value, RoundingMode.Up)
+                .mul(this._error));
+        n = n.div(e.sub(rhs._error)).div(e)
+            .add(ErrorEstimate.rounding_error(r, r.rounding_error_div()));
+        return new Estimate(r, n);
+        // Multiplication in denominator would have the wrong rounding mode
+    }
+
+    div_self (rhs: Estimate): this {
         let m = this.div(rhs);
+        this._value = m._value;
+        this._error = m._error;
+        return this;
+    }
+
+    div_fast (rhs: number): Estimate {
+        rhs = rhs | 0;
+        if (rhs === 0) {
+            throw new ExnPrecision(rhs);
+        }
+        let r = this._value.div(rhs);
+        return new Estimate(r, this._error.div(ErrorEstimate.from_double(rhs))
+            .add(ErrorEstimate.rounding_error(r, r.rounding_error_add())));
+    }
+
+    div_fast_self (rhs: number): this {
+        let m = this.div_fast(rhs);
         this._value = m._value;
         this._error = m._error;
         return this;
@@ -259,7 +272,7 @@ export class Estimate {
 
     // = lhs / this;
     div_by (lhs: number): Estimate {
-        return this.recip().mul(lhs);
+        return this.recip().mul_fast(lhs);
     }
 
     shl (howmuch: number): Estimate {
@@ -303,7 +316,7 @@ export class Estimate {
             return arg.neg();
         }
         let a = arg.weak_is_positive() ? arg : arg.neg();
-        a = a.add(a.get_error()).div(2);
+        a = a.add(a.get_error()).div_fast(2);
         return a.set_error(a);
     }
 
@@ -329,7 +342,7 @@ export class Estimate {
         }
         let d = 1.0 / Math.sqrt(arg.shr(exp).weak_as_double());
         let ei = Estimate.from_double(d).shr(Math.trunc(exp / 2));
-        return nr_iter(arg.div(2), nrif_rsqrt, ei, 45 * 2 - 3);
+        return nr_iter(arg.div_fast(2), nrif_rsqrt, ei, 45 * 2 - 3);
         // This should not be needed!
         //   Estimate err(arg.GetError() / res);
         //   return res.AddError(err / ((res - err) * res));
@@ -345,7 +358,7 @@ export class Estimate {
         }
         let d = 1.0 / Math.sqrt(arg.shr(exp).weak_as_double());
         let ei = Estimate.from_double(d).shr(Math.trunc(exp / 2));
-        return arg.mul_self(nr_iter(arg.div(2), nrif_rsqrt, ei, 45 * 2 - 3));
+        return arg.mul_self(nr_iter(arg.div_fast(2), nrif_rsqrt, ei, 45 * 2 - 3));
         // This should not be needed!
         //   if (arg.IsPositive()) {
         //       return res.AddError(arg.GetError() / res);
@@ -379,7 +392,7 @@ export class Estimate {
         let l = this.ln2(arg.precision);
         let x = arg.clone();
         let e = x.weak_normalize();
-        return log_primary(x.shr(e)).add_self(l.mul(e));
+        return log_primary(x.shr(e)).add_self(l.mul_fast(e));
     }
 
     static exp (arg: Estimate): Estimate {
@@ -394,7 +407,7 @@ export class Estimate {
     }
 
     static sin (arg: Estimate): Estimate {
-        let pi2 = this.pi(arg.precision).mul(2);
+        let pi2 = this.pi(arg.precision).mul_fast(2);
         let x = arg.div(pi2);
         x.sub_self(x.weak_round());
         if (!x.lt(SIN_C1) || !x.gt(SIN_C1m)) {
@@ -414,11 +427,11 @@ export class Estimate {
     }
 
     static cos (arg: Estimate): Estimate {
-        return this.sin(this.pi(arg.precision).div(2).sub_self(arg));
+        return this.sin(this.pi(arg.precision).div_fast(2).sub_self(arg));
     }
 
     static tan (arg: Estimate): Estimate {
-        let pi2 = this.pi(arg.precision).mul(2);
+        let pi2 = this.pi(arg.precision).mul_fast(2);
         let x = arg.div(pi2);
         x.sub_self(x.weak_round());
         let negc = false;
@@ -446,15 +459,15 @@ export class Estimate {
         // We still have a problem with the rsqrt if arg is close to one.
         // in this case, use the cos-sin identities
         if (x.weak_gt(ASIN_C1)) {
-            return this.pi(arg.precision).div(2).sub_self(asin_primary(this.cos_from_sin(x)));
+            return this.pi(arg.precision).div_fast(2).sub_self(asin_primary(this.cos_from_sin(x)));
         } else if (x.weak_lt(ASIN_C1m)) {
-            return this.pi(arg.precision).div(-2).add_self(asin_primary(this.cos_from_sin(x)));
+            return this.pi(arg.precision).div_fast(-2).add_self(asin_primary(this.cos_from_sin(x)));
         }
         return asin_primary(x);
     }
 
     static acos (arg: Estimate): Estimate {
-        return this.pi(arg.precision).div(2).sub_self(this.asin(arg));
+        return this.pi(arg.precision).div_fast(2).sub_self(this.asin(arg));
     }
 
     static atan (arg: Estimate): Estimate {
@@ -479,9 +492,9 @@ export class Estimate {
             // x cannot be distinguished from zero, but this does not stop us to give
             // estimates for the angle based on y and x's possible values
             if (y.is_positive()) {
-                return tpi.div(2).add_error(y.div(x.get_error().mul(2)));
+                return tpi.div_fast(2).add_error(y.div(x.get_error().mul_fast(2)));
             } else if (y.is_negative()) {
-                return tpi.div(-2).add_error(y.div(x.get_error().mul(2)));
+                return tpi.div_fast(-2).add_error(y.div(x.get_error().mul_fast(2)));
             } else {
                 return Estimate.from_double(0).set_error(tpi);
             }
@@ -685,7 +698,7 @@ const nrif_rsqrt: NewtonIterator = (arg: Estimate, est_out: Estimate, prec: numb
 
 
 const psif_exp: SeriesIterator = (arg: Estimate, ws: Estimate, index: number) => {
-    return ws.mul_self(arg).div_self(index);
+    return ws.mul_self(arg).div_fast_self(index);
 };
 
 // For the primary interval [-1;1]
@@ -732,16 +745,16 @@ function rpi (prec: number): Estimate {
         let z = sqrt(sqrt(one.sub(sq(sq(y)))));
         y = one.sub(z).div(one.add(z));
         oa = alpha;
-        alpha = sq(sq(y.add(one))).mul(alpha).sub(y.mul(i).mul(sq(y).add(y).add(one)));
+        alpha = sq(sq(y.add(one))).mul(alpha).sub(y.mul_fast(i).mul(sq(y).add(y).add(one)));
     }
     return alpha.add_error(alpha.sub(oa));
 }
 
 const psif_sin: SeriesIterator = (arg: Estimate, ws: Estimate, index: number) => {
     if (index < 30000) {
-        return ws.mul_self(arg).div_self(2 * index * (2 * index + 1));
+        return ws.mul_self(arg).div_fast_self(2 * index * (2 * index + 1));
     }
-    return ws.mul_self(arg).div_self(2 * index).div_self(2 * index + 1);
+    return ws.mul_self(arg).div_fast_self(2 * index).div_fast_self(2 * index + 1);
 };
 
 // For the primary interval [-pi/2;pi/2]
@@ -751,9 +764,9 @@ function sin_primary (arg: Estimate) {
     // 3^19 for the division factor (1162261467)
     let i = (Math.ceil(Math.sqrt(arg.precision * 20.2)) | 0) * 0.5;
     let j = (i % 19) | 0;
-    let x = arg.div(3 ** j);
+    let x = arg.div_fast(3 ** j);
     for (; j < i; j += 19) {
-        x.div_self(1162261467);
+        x.div_fast_self(1162261467);
     }
     let sum = x.clone();
     let workspace = x.clone();

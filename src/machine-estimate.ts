@@ -1,5 +1,6 @@
 import { ExnDomain, ExnPrecision, Printer } from "./defs";
 import { current_kernel, IKernel } from "./kernels/kernel";
+import { EstimateIvl } from "./estimate-ivl";
 
 // Import some macros
 //! import './macros/debug.jsmacro';
@@ -108,7 +109,7 @@ function round_to_zero (v: number): number { return (v * ONEMEPS); }
 function round_from_zero (v: number): number { return (v * ONEPEPS); }
 
 
-export class MachineEstimate {
+export class MachineEstimate implements EstimateIvl<MachineEstimate> {
     private static kernel: IKernel;
     private static kfns: WKernel;
 
