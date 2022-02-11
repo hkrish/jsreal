@@ -47,6 +47,10 @@ interface WKernel {
 
     trunc32 (x: number): number;
 
+    ulp (x: number): number;
+
+    ulperr (got: number, want: number): number;
+
     ee_mul (mts: number, mtsrhs: number, e: number, mtsidx: number): number;
 
     ee_recip (mts: number, mtsidx: number): void;

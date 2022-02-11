@@ -1473,6 +1473,68 @@
    (param $x f64) (result i32)
    (i32.wrap_i64 (i64.trunc_f64_s (local.get $x))))
 
+ (func $ulp (export "ulp")
+   (param $x f64) (result f64)
+   (local $e i64) (local $ue i64) (local $fe f64)
+   (local.set $e (i64.and
+                  (i64.shr_u (i64.reinterpret_f64 (local.get $x)) (i64.const 52))
+                  (i64.const 0x7ff)))
+   (if (i64.eqz (local.get $e))
+       (then
+        (local.set $e (i64.add (local.get $e) (i64.const 1)))))
+   (local.set $e (i64.sub (i64.sub (local.get $e) (i64.const 0x3ff)) (i64.const 52)))
+   (local.set $fe (f64.convert_i64_s
+                   (i64.shl
+                    (i64.const 1)
+                    (i64.xor
+                     (i64.add (local.get $e)
+                              (local.tee $ue (i64.shr_s (local.get $e) (i64.const 63))))
+                     (local.get $ue)))))
+   (if (result f64) (i64.le_s (local.get $e) (i64.const 0))
+     (then (f64.div (f64.const 1.0) (local.get $fe)))
+     (else (local.get $fe))))
+
+ (func $is_nan_or_inf
+     (param $x f64) (result i32)
+     (local $e64 i64) (local $e i32)
+     (local.set
+      $e
+      (i32.and
+       (i32.wrap_i64
+        (i64.shr_u (local.tee $e64 (i64.reinterpret_f64 (local.get $x))) (i64.const 52)))
+       (i32.const 0x7ff)))
+     (if (result i32) (i32.eq (local.get $e) (i32.const 0x7ff))
+       (then
+        (select
+         (i32.const 1) ;; Inf
+         (i32.const 2) ;; NaN
+         (i64.eqz (i64.shl (local.get $e64) (i64.const 12)))))
+       (else (i32.const 0))))
+
+ (func $ulperr (export "ulperr")
+   (param $got f64) (param $want f64) (result f64)
+   (local $etyp i32)
+   (if (result f64)
+       (i32.and (i32.eq (local.tee $etyp (call $is_nan_or_inf (local.get $got)))
+                        (i32.const 2))
+                (i32.eq (call $is_nan_or_inf (local.get $want)) (i32.const 2)))
+     (then (f64.const 0))
+     (else
+      (if (result f64) (f64.eq (local.get $got) (local.get $want))
+        (then
+         (if (f64.eq (f64.copysign (f64.const 1) (local.get $got))
+                     (f64.copysign (f64.const 1) (local.get $want)))
+             (then (return (f64.const 0))))
+         (f64.const inf))
+        (else
+         (if (i32.eq (local.get $etyp) (i32.const 1))
+             (then
+              (local.set $got (f64.copysign (f64.const 0x1p1023) (local.get $got)))
+              (local.set $want (f64.mul (local.get $want) (f64.const 0.5)))))
+         (f64.abs
+          (f64.div (f64.sub (local.get $want) (local.get $got))
+                   (call $ulp (local.get $want)))))))))
+
 
  ;; ============================================================================
  ;; ----- ErrorEstimate Helpers -----
