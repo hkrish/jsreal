@@ -1566,14 +1566,19 @@
 
 
  (func $ee_recip (export "ee_recip")
-   (param $mts i32) (param $mts* i32)
-   (i32.store (local.get $mts*)
-              (i32.wrap_i64
-               (i64.div_u
-                (i64.sub (i64.add (i64.shl (i64.const 1) (i64.const 62))
-                                  (i64.extend_i32_u (local.get $mts)))
-                         (i64.const 1))
-                (i64.extend_i32_u (local.get $mts))))))
+   (param $mts i32) (result f64)
+   (f64.convert_i64_u
+    (i64.and
+     (i64.div_u
+      (i64.sub (i64.add (i64.shl (i64.const 1) (i64.const 62))
+                        (i64.extend_i32_u (local.get $mts)))
+               (i64.const 1))
+      (i64.extend_i32_u (local.get $mts)))
+     (i64.const 0xffffffff))))
+
+ (func $clz (export "clz")
+   (param $x i32) (result i32)
+   (i32.clz (local.get $x)))
 
 
  ;; ============================================================================

@@ -36,16 +36,13 @@ export class ErrorEstimate {
         mts = $_lo32(mts);
         exp = exp | 0;
         if (mts === 0) {
-            exp = MINUS_INF;
+            this.mts = mts;
+            this.exp = MINUS_INF;
         } else {
-            while ((mts & 0x80000000) === 0) {
-                // TODO: Use clz (or ctz) in wasm to do this in one step?
-                mts *= 2;
-                exp -= 1;
-            }
+            let lz = ErrorEstimate.kfns.clz(mts);
+            this.mts = mts * (2 ** lz);
+            this.exp = exp - lz;
         }
-        this.mts = $_lo32(mts);
-        this.exp = exp | 0;
     }
 
     static initialize () {
@@ -53,25 +50,24 @@ export class ErrorEstimate {
         this.kfns = this.kernel.internal;
     }
 
-    set_mts (mts: number): this {
+    private set_mts (mts: number): this {
+        mts = $_lo32(mts);
         let exp = this.exp;
         if (mts === 0) {
-            exp = MINUS_INF;
+            this.mts = mts;
+            this.exp = MINUS_INF;
         } else {
-            while ((mts & 0x80000000) === 0) {
-                // TODO: Use clz (or ctz) in wasm to do this in one step?
-                mts *= 2;
-                exp -= 1;
-            }
+            let lz = ErrorEstimate.kfns.clz(mts);
+            this.mts = mts * (2 ** lz);
+            this.exp = exp - lz;
         }
-        this.mts = $_lo32(mts);
-        this.exp = exp;
         return this;
     }
 
     clone (): ErrorEstimate {
         return new ErrorEstimate(this.mts, this.exp);
     }
+
 
     // ----- Helpers -----
 
@@ -91,37 +87,6 @@ export class ErrorEstimate {
         }
         // true, if we have carry
         return [$_lo32(mmts), ($_hi32(mmts) !== 0)];
-    }
-
-    // Subtract mantissas of ErrorEstimates, round down
-    static do_ee_mts_sub (full: number, part: number, start: number
-        , exp: number): [number, number] {
-        //--
-        let mmts;
-        if (start >= 32) {
-            mmts = --full;
-        } else {
-            if (start > 0) {
-                if (part & (2 ** start - 1)) {
-                    part = (part >>> start) + 1;
-                } else {
-                    part = (part >>> start);
-                }
-            }
-            mmts = full - part;
-        }
-        mmts = $_lo32(mmts);
-        $_dassert(mmts <= full, 'mts[0] <= full');
-        // Normalise
-        if (mmts === 0) {
-            return [MINUS_INF, 0];
-        }
-        const _2_32 = 2 ** 32;
-        while ((mmts & _2_32) === 0) {
-            --exp;
-            mmts <<= 1;
-        }
-        return [mmts, exp | 0];
     }
 
 
@@ -211,27 +176,25 @@ export class ErrorEstimate {
         }
         // Errors are always positive, a negative result would mean error
         $_dassert(this.exp >= rhs.exp, "errors must always be positive");
-        let [mts, exp] = ErrorEstimate.do_ee_mts_sub(
-            this.mts, rhs.mts, this.exp - rhs.exp, this.exp);
-        return new ErrorEstimate(mts, exp);
-    }
-
-    // Round-up multiplication
-    mul_self (rhs: ErrorEstimate): this {
-        let e = ((this.exp | 0) + (rhs.exp | 0) - 1) | 0;
-        // Handle overflow and special cases
-        if (this.exp >= PLUS_INF || rhs.exp >= PLUS_INF || e >= PLUS_INF) {
-            this.exp = PLUS_INF;
-            this.mts = 0;
-        } else if (this.exp <= MINUS_INF || rhs.exp <= MINUS_INF || e <= MINUS_INF) {
-            this.exp = MINUS_INF;
-            this.mts = 0;
+        let full = this.mts;
+        let part = rhs.mts;
+        let start = this.exp - rhs.exp;
+        let exp = this.exp;
+        let mmts;
+        if (start >= 32) {
+            mmts = --full;
         } else {
-            // Multiply. the result will at least have 1 in 62nd position at most 1 in 63rd
-            this.exp = ErrorEstimate.kfns.ee_mul(this.mts, rhs.mts, e, 0) | 0;
-            this.set_mts(ErrorEstimate.kernel.mem_u32[0]);
+            if (start > 0) {
+                if (part & (2 ** start - 1)) {
+                    part = (part >>> start) + 1;
+                } else {
+                    part = (part >>> start);
+                }
+            }
+            mmts = full - part;
         }
-        return this;
+        $_dassert($_lo32(mmts) <= full, 'mts <= full');
+        return new ErrorEstimate(mmts, exp);
     }
 
     // Round-up multiplication
@@ -265,13 +228,7 @@ export class ErrorEstimate {
         }
         // Calculate
         let exp = -(this.exp - 2);
-        ErrorEstimate.kfns.ee_recip(this.mts, 0);
-        let mts = ErrorEstimate.kernel.mem_u32[0];
-        // Normalise
-        if (!(mts & (2 ** 31))) {
-            mts = (mts << 1) + 1;
-            --exp;
-        }
+        let mts = ErrorEstimate.kfns.ee_recip(this.mts);
         return new ErrorEstimate(mts, exp);
     }
 

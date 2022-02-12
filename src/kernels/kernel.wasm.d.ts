@@ -53,5 +53,7 @@ interface WKernel {
 
     ee_mul (mts: number, mtsrhs: number, e: number, mtsidx: number): number;
 
-    ee_recip (mts: number, mtsidx: number): void;
+    ee_recip (mts: number): number;
+
+    clz (x: number): number;
 }
